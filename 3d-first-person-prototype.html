@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Dragon's Hollow - Real 3D Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;800&family=Nunito:wght@600;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  *{box-sizing:border-box;}
+  html,body{ margin:0; height:100%; overflow:hidden; background:#000; font-family:'Nunito',sans-serif; color:#f2ecff; }
+  #app{ position:relative; width:100vw; height:100vh; }
+  #renderTarget{ position:absolute; inset:0; }
+  #renderTarget canvas{ display:block; width:100%; height:100%; }
+  #crosshair{
+    position:absolute; top:50%; left:50%; width:16px; height:16px; margin:-8px 0 0 -8px;
+    pointer-events:none; z-index:6;
+  }
+  #crosshair::before,#crosshair::after{ content:''; position:absolute; background:rgba(255,255,255,.8); }
+  #crosshair::before{ left:7px; top:0; width:2px; height:16px; }
+  #crosshair::after{ top:7px; left:0; width:16px; height:2px; }
+  #hud{
+    position:absolute; top:10px; left:10px; right:10px; display:flex; justify-content:space-between;
+    font-family:'Cinzel',serif; font-size:.8rem; color:#ffcf5c; text-shadow:0 1px 4px #000; pointer-events:none; z-index:6;
+  }
+  #msg{
+    position:absolute; top:44px; left:50%; transform:translateX(-50%);
+    font-family:'Cinzel',serif; font-size:.9rem; color:#ffcf5c; text-shadow:0 1px 4px #000;
+    opacity:0; transition:opacity .2s; pointer-events:none; z-index:6; white-space:nowrap;
+  }
+  #minimap{ position:absolute; bottom:10px; right:10px; border:2px solid rgba(255,207,92,.6); background:rgba(0,0,0,.5); z-index:6; }
+  #lockPrompt{
+    position:absolute; inset:0; z-index:8; background:rgba(9,5,18,.55);
+    display:flex; align-items:center; justify-content:center; text-align:center;
+    font-family:'Cinzel',serif; font-size:1rem; color:#fff; cursor:pointer;
+  }
+  #lockPrompt.hidden{ display:none; }
+  #controls-note{
+    position:absolute; bottom:10px; left:10px; font-size:.62rem; color:rgba(242,236,255,.75);
+    line-height:1.5; text-shadow:0 1px 3px #000; pointer-events:none; z-index:6;
+  }
+  #startOverlay{
+    position:absolute; inset:0; z-index:20; background:rgba(9,5,18,.92);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; text-align:center; padding:20px;
+  }
+  #startOverlay h1{ font-family:'Cinzel',serif; color:#ffcf5c; font-size:1.6rem; margin:0; text-shadow:0 0 16px rgba(255,166,60,.5); }
+  #startOverlay p{ color:#b6a9dd; max-width:440px; font-size:.85rem; line-height:1.5; margin:0; }
+  #startBtn{
+    font-family:'Nunito',sans-serif; font-weight:800; font-size:1rem; border:none; cursor:pointer;
+    border-radius:10px; padding:12px 28px; background:linear-gradient(180deg,#ffcf5c,#d99a2b); color:#2a1a05;
+    box-shadow:0 4px 0 #8a5c14;
+  }
+  #loadError{
+    position:absolute; inset:0; z-index:30; background:#160810; color:#ff9e9e; display:none;
+    align-items:center; justify-content:center; text-align:center; padding:30px; font-size:.9rem; line-height:1.6;
+  }
+  .touch-only{ display:none; }
+  @media (pointer:coarse){ .touch-only{ display:block; } }
+  .tbtn{
+    position:absolute; width:54px; height:54px; border-radius:50%; z-index:7;
+    background:rgba(255,207,92,.22); border:2px solid rgba(255,207,92,.55); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-size:1.1rem; user-select:none; touch-action:none;
+  }
+  #touchLook{ position:absolute; inset:0; z-index:4; touch-action:none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="renderTarget"></div>
+  <div id="touchLook" class="touch-only"></div>
+  <div id="crosshair"></div>
+  <div id="hud">
+    <div id="hpDisplay">❤️ HP: 100</div>
+    <div id="killDisplay">Wolves defeated: 0</div>
+  </div>
+  <div id="msg"></div>
+  <canvas id="minimap" width="130" height="130"></canvas>
+  <div id="controls-note">WASD move · mouse look (click to lock) · click/Space attack · Esc releases mouse</div>
+  <div id="lockPrompt" class="hidden">Click anywhere to look around</div>
+
+  <div id="startOverlay">
+    <h1>🐉 Dragon's Hollow — Real 3D Prototype</h1>
+    <p>A genuine WebGL 3D scene (Three.js) with real geometry, dynamic torch lighting, and mouse-look — separate from both the main 2D game and the earlier raycasting test. Explore the halls and fight the wolf.</p>
+    <button id="startBtn">Enter the Halls</button>
+  </div>
+  <div id="loadError">3D rendering library failed to load — this needs an internet connection to fetch Three.js from a CDN. Please check your connection and reload.</div>
+
+  <div class="tbtn touch-only" id="tForward" style="left:16px;bottom:80px;">▲</div>
+  <div class="tbtn touch-only" id="tBack" style="left:16px;bottom:18px;">▼</div>
+  <div class="tbtn touch-only" id="tLeft" style="left:76px;bottom:18px;">◀</div>
+  <div class="tbtn touch-only" id="tRight" style="left:136px;bottom:18px;">▶</div>
+  <div class="tbtn touch-only" id="tAttack" style="right:16px;bottom:80px;background:rgba(255,92,108,.3);border-color:rgba(255,92,108,.7);">⚔</div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+if(typeof THREE === 'undefined'){
+  document.getElementById('loadError').style.display='flex';
+  document.getElementById('startOverlay').style.display='none';
+  return;
+}
+
+/* ================= PURE GAMEPLAY LOGIC (unit-tested independently) ================= */
+const MAP_ROWS = [
+"1111111111111",
+"1000000000001",
+"1011101110101",
+"1010001000101",
+"1010111110101",
+"1010100000101",
+"1010101111101",
+"1000101000001",
+"1110101011101",
+"1000001010001",
+"1011111010111",
+"1000000010001",
+"1111111111111",
+];
+const MAP = MAP_ROWS.map(row => row.split('').map(Number));
+const MAP_W = MAP[0].length, MAP_H = MAP.length;
+
+function isWall(x, z) {
+  const gx = Math.floor(x), gz = Math.floor(z);
+  if (gx < 0 || gx >= MAP_W || gz < 0 || gz >= MAP_H) return true;
+  return MAP[gz][gx] > 0;
+}
+function collideMove(px, pz, nx, nz, radius) {
+  let x = px, z = pz;
+  const padX = nx > px ? radius : -radius;
+  if (!isWall(nx + padX, pz)) x = nx;
+  const padZ = nz > pz ? radius : -radius;
+  if (!isWall(x, nz + padZ)) z = nz;
+  return { x, z };
+}
+function hasLineOfSight(x1, z1, x2, z2) {
+  const dx = x2 - x1, dz = z2 - z1;
+  const dist = Math.hypot(dx, dz);
+  const steps = Math.max(1, Math.ceil(dist * 12));
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    if (isWall(x1 + dx * t, z1 + dz * t)) return false;
+  }
+  return true;
+}
+function findOpenCells() {
+  const cells = [];
+  for (let z = 0; z < MAP_H; z++)
+    for (let x = 0; x < MAP_W; x++)
+      if (MAP[z][x] === 0) cells.push({ x: x + 0.5, z: z + 0.5 });
+  return cells;
+}
+function wolfStep(wx, wz, px, pz, speed, dtSeconds, radius) {
+  const dx = px - wx, dz = pz - wz;
+  const d = Math.hypot(dx, dz);
+  if (d < 1.1 || d > 9) return { x: wx, z: wz, moved: false };
+  const nx = wx + (dx / d) * speed * dtSeconds;
+  const nz = wz + (dz / d) * speed * dtSeconds;
+  const resolved = collideMove(wx, wz, nx, nz, radius);
+  return { x: resolved.x, z: resolved.z, moved: true };
+}
+function randomOpenCell(excludeNear) {
+  const cells = findOpenCells();
+  let c;
+  do { c = cells[Math.floor(Math.random() * cells.length)]; }
+  while (excludeNear && Math.hypot(c.x - excludeNear.x, c.z - excludeNear.z) < 3);
+  return c;
+}
+
+/* ================= GAME STATE ================= */
+const player = { x: 2.5, z: 2.5, yaw: 0, pitch: 0, hp: 100, radius: 0.28, speed: 2.6, attackCd: 0 };
+{
+  const start = randomOpenCell();
+  player.x = start.x; player.z = start.z;
+}
+const wolf = { hp: 30, maxHp: 30, alive: true, speed: 1.3, hitFlash: 0, attackCd: 0, ...randomOpenCell(player) };
+let kills = 0;
+
+function showMsg(text){
+  const el=document.getElementById('msg');
+  el.textContent=text; el.style.opacity='1';
+  clearTimeout(showMsg._t);
+  showMsg._t=setTimeout(()=>{ el.style.opacity='0'; }, 1200);
+}
+
+/* ================= THREE.JS SCENE (visual layer only - reads game state above) ================= */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0c0716);
+scene.fog = new THREE.Fog(0x0c0716, 3, 16);
+
+const camera = new THREE.PerspectiveCamera(75, 16/9, 0.05, 60);
+const EYE_HEIGHT = 1.5;
+camera.position.set(player.x, EYE_HEIGHT, player.z);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.getElementById('renderTarget').appendChild(renderer.domElement);
+
+function resize(){
+  const w = document.getElementById('app').clientWidth, h = document.getElementById('app').clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w/h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+// lighting
+const ambient = new THREE.AmbientLight(0x2a2440, 1.1);
+scene.add(ambient);
+const hemi = new THREE.HemisphereLight(0x4a3a6a, 0x1a1020, 0.5);
+scene.add(hemi);
+
+const torches = [];
+function addTorch(x, z){
+  const light = new THREE.PointLight(0xff9a4a, 1.6, 7, 2);
+  light.position.set(x, 1.5, z);
+  light.castShadow = torches.length < 2; // keep shadow-casting lights limited for performance
+  if(light.castShadow){
+    light.shadow.mapSize.set(512,512);
+    light.shadow.camera.near = 0.1;
+    light.shadow.camera.far = 8;
+  }
+  scene.add(light);
+  torches.push({ light, baseIntensity: 1.6, flicker: Math.random()*10 });
+}
+findOpenCells().filter((c,i)=>i%9===0).slice(0,6).forEach(c=>addTorch(c.x,c.z));
+
+// materials
+const wallMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2e, roughness: 0.9, metalness: 0.05 });
+const floorMat = new THREE.MeshStandardMaterial({ color: 0x2a2018, roughness: 1.0 });
+const ceilMat = new THREE.MeshStandardMaterial({ color: 0x15101f, roughness: 1.0 });
+
+// floor & ceiling
+const floorGeo = new THREE.PlaneGeometry(MAP_W, MAP_H);
+const floor = new THREE.Mesh(floorGeo, floorMat);
+floor.rotation.x = -Math.PI/2;
+floor.position.set(MAP_W/2, 0, MAP_H/2);
+floor.receiveShadow = true;
+scene.add(floor);
+
+const ceilGeo = new THREE.PlaneGeometry(MAP_W, MAP_H);
+const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
+ceiling.rotation.x = Math.PI/2;
+ceiling.position.set(MAP_W/2, 2.4, MAP_H/2);
+scene.add(ceiling);
+
+// walls - merge into a single mesh per cell (simple: one box per wall cell)
+const WALL_H = 2.4;
+const wallGeo = new THREE.BoxGeometry(1, WALL_H, 1);
+const wallGroup = new THREE.Group();
+for(let z=0; z<MAP_H; z++){
+  for(let x=0; x<MAP_W; x++){
+    if(MAP[z][x] > 0){
+      const mesh = new THREE.Mesh(wallGeo, wallMat);
+      mesh.position.set(x+0.5, WALL_H/2, z+0.5);
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      wallGroup.add(mesh);
+    }
+  }
+}
+scene.add(wallGroup);
+
+// wolf - simple low-poly quadruped built from primitives
+function buildWolf(){
+  const g = new THREE.Group();
+  const furMat = new THREE.MeshStandardMaterial({ color: 0x8a6a42, roughness: 0.85 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x4a3826, roughness: 0.85 });
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xff5c6c, emissive: 0xff2c3c, emissiveIntensity: 0.8 });
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.42, 0.4), furMat);
+  body.position.set(0, 0.32, 0); body.castShadow=true; g.add(body);
+
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.3, 0.32), furMat);
+  head.position.set(0.52, 0.4, 0); head.castShadow=true; g.add(head);
+
+  const snout = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.14, 0.18), darkMat);
+  snout.position.set(0.74, 0.34, 0); snout.castShadow=true; g.add(snout);
+
+  [[-0.08,0.12],[0.08,0.12]].forEach(([dz,h])=>{
+    const ear = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.16, 4), darkMat);
+    ear.position.set(0.5, 0.6, dz); ear.rotation.x = Math.PI; g.add(ear);
+  });
+
+  const legs = [];
+  [[-0.28,0.62],[0.28,0.62],[-0.28,-0.62],[0.28,-0.62]].forEach(([dx,dzMul])=>{
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1,0.32,0.1), darkMat);
+    leg.position.set(dx, 0.16, dzMul*0.16);
+    leg.castShadow=true; g.add(leg);
+    legs.push(leg);
+  });
+
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.35,0.09,0.09), furMat);
+  tail.position.set(-0.55,0.4,0); tail.rotation.z = 0.4; g.add(tail);
+
+  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.025,6,6), eyeMat);
+  eyeL.position.set(0.62,0.44,0.09); g.add(eyeL);
+  const eyeR = eyeL.clone(); eyeR.position.z=-0.09; g.add(eyeR);
+
+  g.userData.legs = legs;
+  g.userData.body = body;
+  g.userData.materials = [furMat, darkMat];
+  return g;
+}
+const wolfMesh = buildWolf();
+scene.add(wolfMesh);
+
+// simple first-person viewmodel weapon (dagger), parented to the camera
+const daggerGroup = new THREE.Group();
+{
+  const bladeMat = new THREE.MeshStandardMaterial({ color: 0xd8d8d0, metalness: 0.6, roughness: 0.3 });
+  const hiltMat = new THREE.MeshStandardMaterial({ color: 0x5a3a1e, roughness: 0.8 });
+  const blade = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.32, 4), bladeMat);
+  blade.rotation.x = Math.PI/2; blade.position.set(0,0,-0.2);
+  const hilt = new THREE.Mesh(new THREE.CylinderGeometry(0.025,0.03,0.14,6), hiltMat);
+  hilt.rotation.x = Math.PI/2; hilt.position.set(0,0,0.02);
+  daggerGroup.add(blade); daggerGroup.add(hilt);
+}
+daggerGroup.position.set(0.22,-0.22,-0.4);
+daggerGroup.rotation.set(0.1,-0.2,0.15);
+camera.add(daggerGroup);
+scene.add(camera);
+
+/* ================= INPUT: keyboard, pointer-lock mouse look, touch ================= */
+const keys = new Set();
+window.addEventListener('keydown', e=>{
+  keys.add(e.key.toLowerCase());
+  if(e.key===' ') tryAttack();
+});
+window.addEventListener('keyup', e=>keys.delete(e.key.toLowerCase()));
+
+const domEl = renderer.domElement;
+const lockPrompt = document.getElementById('lockPrompt');
+let pointerLocked = false;
+domEl.addEventListener('click', ()=>{
+  if(!pointerLocked){ domEl.requestPointerLock && domEl.requestPointerLock(); }
+  else { tryAttack(); }
+});
+document.addEventListener('pointerlockchange', ()=>{
+  pointerLocked = document.pointerLockElement === domEl;
+  lockPrompt.classList.toggle('hidden', pointerLocked);
+});
+document.addEventListener('mousemove', e=>{
+  if(!pointerLocked) return;
+  player.yaw -= e.movementX * 0.0022;
+  player.pitch -= e.movementY * 0.0022;
+  player.pitch = Math.max(-1.2, Math.min(1.2, player.pitch));
+});
+
+// touch look (drag anywhere on #touchLook)
+const touchLookEl = document.getElementById('touchLook');
+let touchLookId = null, lastTX=0, lastTY=0;
+touchLookEl.addEventListener('pointerdown', e=>{ touchLookId=e.pointerId; lastTX=e.clientX; lastTY=e.clientY; });
+touchLookEl.addEventListener('pointermove', e=>{
+  if(e.pointerId!==touchLookId) return;
+  const dx=e.clientX-lastTX, dy=e.clientY-lastTY;
+  lastTX=e.clientX; lastTY=e.clientY;
+  player.yaw -= dx*0.0035;
+  player.pitch -= dy*0.0035;
+  player.pitch = Math.max(-1.2, Math.min(1.2, player.pitch));
+});
+touchLookEl.addEventListener('pointerup', ()=>touchLookId=null);
+
+let touchMove = { f:0, s:0 };
+function bindHold(id, onDown, onUp){
+  const el=document.getElementById(id);
+  el.addEventListener('pointerdown', e=>{ e.preventDefault(); e.stopPropagation(); onDown(); });
+  el.addEventListener('pointerup', onUp);
+  el.addEventListener('pointercancel', onUp);
+  el.addEventListener('pointerleave', onUp);
+}
+bindHold('tForward', ()=>touchMove.f=1, ()=>touchMove.f=0);
+bindHold('tBack', ()=>touchMove.f=-1, ()=>touchMove.f=0);
+bindHold('tLeft', ()=>touchMove.s=-1, ()=>touchMove.s=0);
+bindHold('tRight', ()=>touchMove.s=1, ()=>touchMove.s=0);
+bindHold('tAttack', ()=>tryAttack(), ()=>{});
+
+/* ================= ATTACK (uses tested pure logic, not Three.js raycasting) ================= */
+function tryAttack(){
+  if(player.attackCd > 0) return;
+  player.attackCd = 420;
+  daggerSwing = 1;
+  if(!wolf.alive) { showMsg('Miss!'); return; }
+  const dx = wolf.x-player.x, dz = wolf.z-player.z;
+  const dist = Math.hypot(dx,dz);
+  const targetYaw = Math.atan2(-dx, -dz);
+  let diff = targetYaw - player.yaw;
+  while(diff>Math.PI) diff-=Math.PI*2;
+  while(diff<-Math.PI) diff+=Math.PI*2;
+  const inCone = Math.abs(diff) < 0.3;
+  const inRange = dist < 3.0;
+  const sees = hasLineOfSight(player.x, player.z, wolf.x, wolf.z);
+  if(inCone && inRange && sees){
+    wolf.hp -= 12; wolf.hitFlash = 180;
+    if(wolf.hp<=0){
+      wolf.alive=false; kills++;
+      document.getElementById('killDisplay').textContent='Wolves defeated: '+kills;
+      showMsg('The wolf falls!');
+      wolfMesh.visible=false;
+      setTimeout(()=>{
+        const spot = randomOpenCell(player);
+        wolf.x=spot.x; wolf.z=spot.z; wolf.hp=wolf.maxHp; wolf.alive=true;
+        wolfMesh.visible=true;
+        showMsg('A wolf howls nearby...');
+      }, 1400);
+    } else {
+      showMsg('Hit!');
+    }
+  } else {
+    showMsg('Miss!');
+  }
+}
+
+/* ================= UPDATE ================= */
+let daggerSwing = 0;
+function update(dtMs){
+  const dt = dtMs/1000;
+  player.attackCd = Math.max(0, player.attackCd - dtMs);
+  daggerSwing = Math.max(0, daggerSwing - dt*3.2);
+
+  let fwd=0, strafe=0;
+  if(keys.has('w')) fwd+=1;
+  if(keys.has('s')) fwd-=1;
+  if(keys.has('d')) strafe+=1;
+  if(keys.has('a')) strafe-=1;
+  fwd += touchMove.f; strafe += touchMove.s;
+  const mag=Math.hypot(fwd,strafe);
+  if(mag>0.01){
+    fwd/=Math.max(1,mag); strafe/=Math.max(1,mag);
+    // forward matches THREE.js's actual Y-rotation convention for a camera
+    // (verified independently against the rotation matrix - see test_camera_math.js)
+    const fx=-Math.sin(player.yaw), fz=-Math.cos(player.yaw);
+    const sx=Math.cos(player.yaw), sz=-Math.sin(player.yaw);
+    const nx = player.x + (fx*fwd + sx*strafe)*player.speed*dt;
+    const nz = player.z + (fz*fwd + sz*strafe)*player.speed*dt;
+    const resolved = collideMove(player.x, player.z, nx, nz, player.radius);
+    player.x = resolved.x; player.z = resolved.z;
+  }
+
+  if(wolf.alive){
+    wolf.hitFlash = Math.max(0, wolf.hitFlash - dtMs);
+    const step = wolfStep(wolf.x, wolf.z, player.x, player.z, wolf.speed, dt, 0.3);
+    wolf.x = step.x; wolf.z = step.z;
+    wolf.attackCd = Math.max(0, wolf.attackCd - dtMs);
+    const d = Math.hypot(player.x-wolf.x, player.z-wolf.z);
+    if(d <= 1.1 && wolf.attackCd<=0){
+      wolf.attackCd = 900;
+      player.hp = Math.max(0, player.hp-6);
+      document.getElementById('hpDisplay').textContent = '❤️ HP: '+player.hp;
+      showMsg('The wolf bites you!');
+    }
+  }
+
+  // sync visuals to gameplay state
+  camera.position.set(player.x, EYE_HEIGHT + Math.sin(performance.now()*0.006)*(mag>0.01?0.03:0), player.z);
+  camera.rotation.order='YXZ';
+  camera.rotation.y = player.yaw;
+  camera.rotation.x = player.pitch;
+
+  wolfMesh.position.set(wolf.x, 0, wolf.z);
+  const faceAngle = Math.atan2(-(player.z-wolf.z), player.x-wolf.x);
+  wolfMesh.rotation.y = faceAngle;
+  wolfMesh.userData.materials.forEach(m=> m.color.setHex(wolf.hitFlash>0 ? 0xffffff : (m===wolfMesh.userData.materials[0]?0x8a6a42:0x4a3826)));
+  const legBob = Math.sin(performance.now()*0.01)*0.06;
+  wolfMesh.userData.legs.forEach((leg,i)=> leg.position.y = 0.16 + (i%2===0?legBob:-legBob));
+
+  daggerGroup.rotation.x = 0.1 - daggerSwing*0.9;
+  daggerGroup.position.z = -0.4 + daggerSwing*0.18;
+
+  torches.forEach(t=>{ t.flicker+=dt*8; t.light.intensity = t.baseIntensity + Math.sin(t.flicker)*0.25 + (Math.random()-0.5)*0.15; });
+}
+
+/* ================= MINIMAP (2D overlay, independent of the 3D scene) ================= */
+const mm = document.getElementById('minimap'), mg = mm.getContext('2d');
+function renderMinimap(){
+  mg.clearRect(0,0,130,130);
+  const cell = 130/MAP_W;
+  for(let z=0;z<MAP_H;z++) for(let x=0;x<MAP_W;x++){
+    mg.fillStyle = MAP[z][x]>0 ? '#4a3826' : '#241a30';
+    mg.fillRect(x*cell, z*cell, cell, cell);
+  }
+  mg.fillStyle='#ffcf5c';
+  mg.beginPath(); mg.arc(player.x*cell, player.z*cell, 3, 0, Math.PI*2); mg.fill();
+  mg.strokeStyle='#ffcf5c'; mg.lineWidth=1.5;
+  const fx=-Math.sin(player.yaw), fz=-Math.cos(player.yaw);
+  mg.beginPath(); mg.moveTo(player.x*cell, player.z*cell);
+  mg.lineTo(player.x*cell+fx*9, player.z*cell+fz*9); mg.stroke();
+  if(wolf.alive){ mg.fillStyle='#ff5c6c'; mg.beginPath(); mg.arc(wolf.x*cell, wolf.z*cell, 3,0,Math.PI*2); mg.fill(); }
+}
+
+/* ================= MAIN LOOP ================= */
+let last = performance.now(), running = false;
+function loop(now){
+  requestAnimationFrame(loop);
+  const dt = Math.min(now-last, 50); last = now;
+  if(running){
+    update(dt);
+    renderer.render(scene, camera);
+    renderMinimap();
+  }
+}
+requestAnimationFrame(loop);
+
+document.getElementById('startBtn').onclick = ()=>{
+  document.getElementById('startOverlay').style.display='none';
+  lockPrompt.classList.remove('hidden');
+  running = true; last = performance.now();
+};
+
+window.__PROTO3D_DEBUG__ = { MAP, MAP_W, MAP_H, isWall, collideMove, hasLineOfSight, findOpenCells, wolfStep, player, wolf, update, scene, camera, renderer };
+})();
+</script>
+</body>
+</html>
