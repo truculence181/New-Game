@@ -1,44 +1,48 @@
 # 🐉 Dragon's Hollow — 3D
 
-A browser-based first-person fantasy action game built with [Three.js](https://threejs.org/) (WebGL) — real 3D geometry, dynamic torch lighting with shadows, mouse-look, and a first-person viewmodel weapon. Explore a dungeon maze and fight off wolves.
+A browser-based first-person fantasy action RPG built with [Three.js](https://threejs.org/) (WebGL) — real 3D geometry, dynamic torch lighting with shadows, mouse-look, class selection, and a full XP/skill tree/loot progression system.
 
-**This is the primary/active version of the project.** The original 2D top-down co-op game (the earlier iteration of Dragon's Hollow) has been moved to [`legacy/`](./legacy) for reference — see below.
+**This is the primary/active version of the project.** The original 2D top-down co-op game has been moved to [`legacy/`](./legacy) for reference.
 
 ## Play it
 
-Open **`index.html`** in a modern browser. It needs an internet connection on first load (to fetch Three.js from a CDN) — everything else is self-contained in the one file.
+Open **`index.html`** in a modern browser. Needs an internet connection on first load (to fetch Three.js from a CDN) — everything else is self-contained in the one file.
 
-Hosted for free on GitHub Pages: enable it in Settings → Pages → Deploy from branch → `main` / root. The game will be live at `https://<your-username>.github.io/<repo-name>/`.
+Hosted for free on GitHub Pages: enable it in Settings → Pages → Deploy from branch → `main` / root.
+
+## Choose your hero
+
+Five classes, each with real stat and playstyle differences:
+
+| Class | Attack | Style |
+|---|---|---|
+| Warrior | Melee | Tanky, high HP, short-range heavy blade |
+| Mage | Ranged bolt | Glass cannon, strong burst damage |
+| Ranger | Ranged bolt | Fastest, longest range, lower damage |
+| Necromancer | Ranged bolt | Balanced dark-magic damage dealer |
+| Beastmaster | Melee | Tough with the longest melee reach |
 
 ## Controls
 
-**Desktop:**
+**Desktop:** WASD to move, mouse to look (click to lock your cursor), click or Space to attack, Esc to release the cursor, ⭐ to open the skill tree.
 
-| Action | Input |
-|---|---|
-| Move | W / A / S / D |
-| Look | Mouse (click the game to lock your cursor) |
-| Attack | Click, or Space |
-| Release cursor | Esc |
+**Mobile / touch:** left analog joystick to move, drag anywhere else to look, ⚔ button to attack, ⭐ button for the skill tree. Controls are dual-touch aware (hold the joystick with one thumb, look with the other) and use safe-area-aware sizing so they don't get clipped on small phone screens.
 
-**Mobile / touch:**
+## Progression systems
 
-| Action | Input |
-|---|---|
-| Move | Left analog joystick (bottom-left) |
-| Look | Drag anywhere else on screen |
-| Attack | ⚔ button (bottom-right) |
-
-Controls are dual-touch aware — you can hold the joystick with one thumb and drag to look with the other at the same time. A rotate-to-landscape prompt appears automatically if a phone is held in portrait.
+- **XP & leveling** — defeating wolves grants XP; leveling up grants a skill point
+- **Skill tree** (⭐ button, pauses the game) — 5 upgradeable nodes: Vitality (+HP), Might (+damage), Swiftness (+speed), Focus (-cooldown), Vampirism (heal on hit)
+- **Loot & equipment** — wolves have a chance to drop gear across 3 rarity tiers (weapon/armor/trinket slots), shown in the world as a glowing floating icon and auto-equipped on pickup
 
 ## Features
 
-- Real WebGL 3D scene: box-built maze walls, floor, ceiling, and fog for depth
-- Dynamic point-light torches that flicker and cast real shadows
+- Real WebGL 3D scene: procedurally-textured brick walls and stone floor (canvas-generated, no external image files), fog for depth, ceiling beams
+- Dynamic point-light torches with wall brackets and flickering flame props that cast real shadows
+- Environment props for visual variety: barrels, crates, rubble piles, and columns scattered through the maze
 - A low-poly 3D wolf enemy with a walk cycle that turns to face you and chases based on line-of-sight-aware AI
-- First-person viewmodel dagger that swings on attack
+- Per-class first-person viewmodels (sword, staff, bow, tome, coiled whip) and ranged spell/arrow projectiles for casters
 - Minimap overlay showing the maze layout and live positions
-- Fully separated architecture: all gameplay rules (movement, collision, line-of-sight, enemy AI) are pure functions independent of Three.js, so the rendering layer only ever *reads* game state — it never owns game logic
+- Fully separated architecture: all gameplay rules (movement, collision, line-of-sight, enemy AI, XP/skills/loot math) are pure functions independent of Three.js — the rendering layer only ever *reads* game state, it never owns game logic
 
 ## Project structure
 
@@ -52,14 +56,15 @@ Controls are dual-touch aware — you can hold the joystick with one thumb and d
 
 ## About legacy/dragons-hollow-2d.html
 
-This is the original version of Dragon's Hollow: a 2D top-down local co-op action RPG (1-2 players, 5 hero classes, a skill tree, loot/equipment, 5 explorable rooms, and a boss fight). It's fully playable and kept here for reference / in case development ever branches back to it, but **it is no longer the actively developed version** - all new work is going into the 3D game at the repo root.
+The original version of Dragon's Hollow: a 2D top-down local co-op action RPG (1-2 players, 5 hero classes, a skill tree, loot/equipment, 5 explorable rooms, and a boss fight). Fully playable, kept for reference, but **no longer the actively developed version**.
 
 ## Development notes
 
-- **Single-file architecture is intentional** for both games: everything (HTML/CSS/JS, all art, all audio) lives in one file, no build tooling, no external asset files. Google Fonts and the Three.js CDN script are the only external network dependencies, loaded directly by the browser.
-- **No package.json / no npm install** - there is no build step for either file.
-- The 3D game's gameplay logic (collision, line-of-sight, enemy movement, and the camera-direction math) was developed and unit-tested in isolation with Node before being wired into the Three.js rendering layer, specifically because WebGL rendering can't be executed/verified in a headless environment the way plain game logic can. If you're extending the 3D game, keeping that separation (pure logic functions vs. Three.js scene code) is strongly recommended - it's what made it possible to catch a real camera-direction bug (movement not matching look direction) before it ever shipped.
+- **Single-file architecture is intentional** for both games: everything (HTML/CSS/JS, all art, all audio) lives in one file, no build tooling, no external asset files. Google Fonts and the Three.js CDN script are the only external network dependencies.
+- **No package.json / no npm install** — no build step for either file.
+- The 3D game's entire gameplay layer (movement, collision, line-of-sight, enemy AI, camera-direction math, class stats, skill math, equipment math, XP curves, and projectile physics) was developed and unit-tested in isolation with Node *before* being wired into the Three.js rendering layer, because WebGL rendering can't be executed/verified in a headless environment the way plain game logic can. Combat was additionally verified end-to-end (aim → attack → hit → kill → XP award, for both melee and ranged classes) using a headless Three.js API stub, and loot pickup and skill-point spending were verified the same way. If you're extending the 3D game, keeping gameplay logic as pure, Three.js-independent functions is strongly recommended — it's what makes this level of testing possible without a browser.
 
 ## License
 
 No license file is currently included - add one (MIT is a common, permissive choice for a hobby project like this) if you plan to share or accept contributions.
+
