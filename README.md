@@ -22,6 +22,20 @@ Five classes, each with real stat differences, a distinct attack, and a unique s
 | Necromancer | Ranged bolt | Raise Ally — summons a skeleton that fights alongside you |
 | Beastmaster | Melee | Call Companion — summons a wolf pup ally |
 
+## Weapon progression
+
+Each class has its own named 3-tier weapon line — Starter → Discovered → Legendary — found as loot drops in the world instead of generic gear. Each tier jumps your base damage and unlocks a new effect:
+
+| Class | Discovered (unlocks) | Legendary (unlocks) |
+|---|---|---|
+| Warrior | Sunforged Greatsword — *Sunstrike*: every 4th hit triggers a bonus shockwave | Dragonfang Cleaver — *Cleaving Roar*: special gets a bigger radius + knockback |
+| Mage | Frostfire Staff — *Elemental Alternation*: bolts alternate fire (DoT) / ice (slow) | Staff of the Ancients — *Arcane Nova* becomes a ring of homing star-bolts |
+| Ranger | Windrunner Bow — *Gale Shot*: every 5th arrow splits into 3 | Phoenix Bow — *Phoenix Volley*: special fires 5 arrows that splash on impact |
+| Necromancer | Soul Reaper Scythe — *Soul Drain*: bonus lifesteal on every hit | Grimoire of the Fallen King — *Legion of Bone*: special summons 2 allies |
+| Beastmaster | Beastcaller Horn — *Rally Call*: re-pressing special with a companion out triggers an instant bonus attack instead of re-summoning | Primal Bond Gauntlet — *Primal Surge*: summoning also buffs your own speed & damage |
+
+Weapon tiers persist visually too — Legendary weapons read larger with a faint glowing aura around the tip/blade.
+
 ## Controls
 
 **Desktop:** WASD to move, mouse to look (click to lock your cursor), click or Space to attack, E or right-click for your special, Esc to release the cursor, ⭐ to open the skill tree.

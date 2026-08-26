@@ -337,12 +337,64 @@ function randomOpenCell(excludeNear) {
 
 /* ================= PURE GAMEPLAY LOGIC: RPG systems (unit-tested independently) ================= */
 const CLASS_DEFS = {
-  warrior:     { name:'Warrior',     icon:'⚔️', hp:140, speed:2.6, dmg:16, atkType:'melee',  range:3.0,  cooldown:420, color:0xe6484a, desc:'Tough melee fighter with a heavy blade.' },
-  mage:        { name:'Mage',        icon:'🔮', hp:90,  speed:2.3, dmg:13, atkType:'ranged', range:9,    cooldown:520, projSpeed:9,  color:0x3aa0ff, desc:'Hurls arcane bolts from a distance.' },
+  warrior:     { name:'Warrior',     icon:'⚔️', hp:140, speed:2.6, dmg:10, atkType:'melee',  range:3.0,  cooldown:420, color:0xe6484a, desc:'Tough melee fighter with a heavy blade.' },
+  mage:        { name:'Mage',        icon:'🔮', hp:90,  speed:2.3, dmg:8,  atkType:'ranged', range:9,    cooldown:520, projSpeed:9,  color:0x3aa0ff, desc:'Hurls arcane bolts from a distance.' },
   ranger:      { name:'Ranger',      icon:'🏹', hp:100, speed:2.9, dmg:9,  atkType:'ranged', range:10,   cooldown:300, projSpeed:12, color:0x33c17a, desc:'Fast, agile, and deadly with a bow.' },
-  necromancer: { name:'Necromancer', icon:'💀', hp:95,  speed:2.4, dmg:12, atkType:'ranged', range:8,    cooldown:480, projSpeed:8,  color:0x8a5bd6, desc:'Channels dark bolts of necrotic energy.' },
-  beastmaster: { name:'Beastmaster', icon:'🐺', hp:125, speed:2.7, dmg:13, atkType:'melee',  range:3.4,  cooldown:380, color:0xffc93c, desc:'Whip-crack melee with impressive reach.' },
+  necromancer: { name:'Necromancer', icon:'💀', hp:95,  speed:2.4, dmg:9,  atkType:'ranged', range:8,    cooldown:480, projSpeed:8,  color:0x8a5bd6, desc:'Channels dark bolts of necrotic energy.' },
+  beastmaster: { name:'Beastmaster', icon:'🐺', hp:125, speed:2.7, dmg:8,  atkType:'melee',  range:3.4,  cooldown:380, color:0xffc93c, desc:'Whip-crack melee with impressive reach.' },
 };
+// Three-tier weapon progression per class (Starter -> Discovered -> Legendary),
+// adapted from the design spec. Each tier's baseDamage REPLACES the class's
+// base damage while equipped; `unlock` keys gate the proc effects below.
+const WEAPON_TIERS = {
+  warrior: [
+    { id:'oak_guard_sword', name:'Oak Guard Sword', icon:'🗡️', baseDamage:10, unlock:null,
+      flavor:null },
+    { id:'sunforged_greatsword', name:'Sunforged Greatsword', icon:'⚔️', baseDamage:16, unlock:'sunstrike',
+      flavor:'A wide, sun-etched blade that hums with gold light.' },
+    { id:'dragonfang_cleaver', name:'Dragonfang Cleaver', icon:'🐲', baseDamage:28, unlock:'cleaving_roar',
+      flavor:"Forged from a dragon's own fang, still warm to the touch." },
+  ],
+  mage: [
+    { id:'apprentice_wand', name:'Apprentice Wand', icon:'🪄', baseDamage:8, unlock:null,
+      flavor:null },
+    { id:'frostfire_staff', name:'Frostfire Staff', icon:'🔮', baseDamage:14, unlock:'elemental_alternation',
+      flavor:'Half frost, half ember, forever in balance.' },
+    { id:'staff_of_the_ancients', name:'Staff of the Ancients', icon:'✨', baseDamage:22, unlock:'arcane_nova_upgrade',
+      flavor:'The runes hum before you even touch it.' },
+  ],
+  ranger: [
+    { id:'hunters_shortbow', name:"Hunter's Shortbow", icon:'🏹', baseDamage:9, unlock:null,
+      flavor:null },
+    { id:'windrunner_bow', name:'Windrunner Bow', icon:'🏹', baseDamage:15, unlock:'gale_shot',
+      flavor:'Arrows that chase the wind itself.' },
+    { id:'phoenix_bow', name:'Phoenix Bow', icon:'🔥', baseDamage:24, unlock:'phoenix_volley_upgrade',
+      flavor:'Feathers that never quite stop smoldering.' },
+  ],
+  necromancer: [
+    { id:'bone_scepter', name:'Bone Scepter', icon:'💀', baseDamage:9, unlock:null,
+      flavor:null },
+    { id:'soul_reaper_scythe', name:'Soul Reaper Scythe', icon:'⚰️', baseDamage:16, unlock:'soul_drain',
+      flavor:'Wisps of spent souls drift from its edge.' },
+    { id:'grimoire_of_the_fallen_king', name:'Grimoire of the Fallen King', icon:'📖', baseDamage:20, unlock:'legion_of_bone',
+      flavor:'Its pages turn themselves, remembering battles not yet fought.' },
+  ],
+  beastmaster: [
+    { id:'taming_whip', name:'Taming Whip', icon:'🪢', baseDamage:8, unlock:null,
+      flavor:null },
+    { id:'beastcaller_horn', name:'Beastcaller Horn', icon:'📯', baseDamage:8, unlock:'rally_call',
+      flavor:'The wilds answer when it sounds.' },
+    { id:'primal_bond_gauntlet', name:'Primal Bond Gauntlet', icon:'🐾', baseDamage:18, unlock:'primal_surge',
+      flavor:'Wear it, and the beast inside no longer feels alone.' },
+  ],
+};
+function weaponTierForRarity(rarity){ return rarity==='epic' ? 2 : 1; }
+function rollLootKind(rarity, currentWeaponTier, rng){
+  const tier = weaponTierForRarity(rarity);
+  const weaponAvailable = tier > currentWeaponTier;
+  if(weaponAvailable && rng < 0.5) return { kind:'weapon', tier };
+  return { kind:'equip', slot: rng<0.75 ? 'armor' : 'trinket' };
+}
 const SKILL_DEFS = {
   vitality:   { name:'Vitality',   icon:'❤️', maxRank:3, desc:'+12 Max HP per rank' },
   might:      { name:'Might',      icon:'💪', maxRank:3, desc:'+8% damage per rank' },
@@ -361,9 +413,6 @@ const SPECIAL_DEFS = {
 const RARITY_COLORS = { common:0xb6a9dd, rare:0x3aa0ff, epic:0xffc93c };
 const RARITY_CSS = { common:'#b6a9dd', rare:'#3aa0ff', epic:'#ffc93c' };
 const EQUIPMENT_DEFS = {
-  ironEdge:      { name:'Iron Edge',         icon:'🗡️', slot:'weapon',  rarity:'common', dmgBonus:0.08 },
-  runedBlade:    { name:'Runed Blade',       icon:'⚔️', slot:'weapon',  rarity:'rare',   dmgBonus:0.15 },
-  dragonfang:    { name:'Dragonfang',        icon:'🐲', slot:'weapon',  rarity:'epic',   dmgBonus:0.25 },
   leatherVest:   { name:'Leather Vest',      icon:'🥋', slot:'armor',   rarity:'common', hpBonus:15 },
   chainmail:     { name:'Chainmail',         icon:'🔗', slot:'armor',   rarity:'rare',   hpBonus:30 },
   dragonPlate:   { name:'Dragonscale Plate', icon:'🛡️', slot:'armor',   rarity:'epic',   hpBonus:50 },
@@ -439,7 +488,8 @@ let gameState = 'select'; // 'select' | 'playing'
 let paused = false;
 let selectedClass = 'warrior';
 let player = null;
-const wolf = { hp: 30, maxHp: 30, alive: true, speed: 1.3, hitFlash: 0, attackCd: 0, x:0, z:0 };
+const wolf = { hp: 30, maxHp: 30, alive: true, speed: 1.3, hitFlash: 0, attackCd: 0, x:0, z:0,
+  slowMs:0, dotMs:0, dotTickMs:0, dotDmg:0 };
 let kills = 0;
 let levelIndex = 0;
 let killsThisLevel = 0;
@@ -457,7 +507,9 @@ function newPlayer(cls){
   return {
     cls, x:start.x, z:start.z, yaw:0, pitch:0, radius:0.28,
     hp:maxHp, maxHp, baseHp:def.hp,
-    attackCd:0, specialCd:0, level:1, xp:0, skillPoints:0, skills, equipment
+    attackCd:0, specialCd:0, level:1, xp:0, skillPoints:0, skills, equipment,
+    weaponTier:0, hitCounter:0, boltAlt:0,
+    buffMs:0, buffDmgMult:1, buffSpeedMult:1
   };
 }
 function respawnWolf(nearExclude){
@@ -771,7 +823,8 @@ const wolfMesh = buildWolf();
 scene.add(wolfMesh);
 
 /* ---- per-class first-person viewmodel ---- */
-function buildViewmodel(cls){
+function buildViewmodel(cls, tier){
+  tier = tier||0;
   const g = new THREE.Group();
   const metalMat = new THREE.MeshStandardMaterial({ color: 0xd8d8d0, metalness: 0.7, roughness: 0.25 });
   const darkMetalMat = new THREE.MeshStandardMaterial({ color: 0x4a4640, metalness: 0.6, roughness: 0.4 });
@@ -897,6 +950,15 @@ function buildViewmodel(cls){
     tail.rotation.z = Math.PI/2; tail.position.set(-0.14,0.08,-0.24);
     g.add(handle,wraps,pommelCap,coil,tail);
   }
+  // tier progression: legendary weapons read as visibly larger and more charged
+  if(tier>=1) g.scale.set(1.12,1.12,1.12);
+  if(tier>=2){
+    g.scale.set(1.28,1.28,1.28);
+    const auraMat = new THREE.MeshStandardMaterial({ color: classColor, emissive: classColor, emissiveIntensity: 0.5, transparent:true, opacity:0.25 });
+    const aura = new THREE.Mesh(new THREE.SphereGeometry(0.1,8,8), auraMat);
+    aura.position.set(0,0,-0.25);
+    g.add(aura);
+  }
   return g;
 }
 
@@ -918,15 +980,22 @@ function makeIconSprite(emoji){
 function spawnLootDrop(x,z){
   if(Math.random()>0.3) return;
   const rarity = rollLootRarity(Math.random());
-  const itemId = pickItemOfRarity(rarity);
-  const item = EQUIPMENT_DEFS[itemId];
-  const sprite = makeIconSprite(item.icon);
+  const roll = rollLootKind(rarity, player.weaponTier, Math.random());
+  let icon, dropData;
+  if(roll.kind==='weapon'){
+    const w = WEAPON_TIERS[player.cls][roll.tier];
+    icon = w.icon; dropData = { kind:'weapon', tier:roll.tier };
+  } else {
+    const itemId = pickItemOfRarity(rarity);
+    icon = EQUIPMENT_DEFS[itemId].icon; dropData = { kind:'equip', itemId };
+  }
+  const sprite = makeIconSprite(icon);
   sprite.position.set(x, 0.55, z);
   scene.add(sprite);
   const light = new THREE.PointLight(RARITY_COLORS[rarity], 0.9, 2.2, 2);
   light.position.set(x, 0.5, z);
   scene.add(light);
-  lootDrops.push({ x, z, itemId, sprite, light, born: performance.now() });
+  lootDrops.push(Object.assign({ x, z, sprite, light, born: performance.now() }, dropData));
 }
 function equipItem(itemId){
   const item = EQUIPMENT_DEFS[itemId];
@@ -936,6 +1005,15 @@ function equipItem(itemId){
   player.hp = rescaleHpForNewMax(player.hp, oldMax, newMax);
   player.maxHp = newMax;
   showMsg('Found '+item.name+'!');
+  updateHud();
+}
+function equipWeaponTier(tier){
+  player.weaponTier = tier;
+  const w = WEAPON_TIERS[player.cls][tier];
+  showMsg('Found the '+w.name+'!'+(w.flavor?(' '+w.flavor):''));
+  if(viewmodelGroup.parent) camera.remove(viewmodelGroup);
+  viewmodelGroup = buildViewmodel(player.cls, tier);
+  camera.add(viewmodelGroup);
   updateHud();
 }
 
@@ -1058,9 +1136,11 @@ function damageWolf(amount, fromAlly){
 function tryAttack(){
   if(gameState!=='playing' || player.attackCd > 0) return;
   const def = CLASS_DEFS[player.cls];
+  const weapon = WEAPON_TIERS[player.cls][player.weaponTier];
   player.attackCd = computeCooldown(def.cooldown, player.skills, player.equipment.trinket);
   daggerSwing = 1;
-  const dmg = computeDamage(def.dmg, player.skills, player.equipment.weapon);
+  const buffMult = player.buffMs>0 ? player.buffDmgMult : 1;
+  const dmg = Math.round(computeDamage(weapon.baseDamage, player.skills, null) * buffMult);
 
   if(def.atkType==='melee'){
     if(!wolf.alive){ showMsg('Miss!'); return; }
@@ -1073,21 +1153,61 @@ function tryAttack(){
     const inCone = Math.abs(diff) < 0.32;
     const inRange = dist < def.range;
     const sees = hasLineOfSight(player.x, player.z, wolf.x, wolf.z);
-    if(inCone && inRange && sees){ damageWolf(dmg); showMsg('Hit!'); }
-    else { showMsg('Miss!'); }
+    if(inCone && inRange && sees){
+      damageWolf(dmg);
+      showMsg('Hit!');
+      // Warrior tier>=1: Sunstrike - every 4th successful hit triggers a bonus shockwave
+      if(player.cls==='warrior' && weaponTierUnlocked(player,1)){
+        player.hitCounter++;
+        if(player.hitCounter%4===0 && wolf.alive){
+          const bonus = Math.round(dmg*0.5);
+          damageWolf(bonus);
+          spawnBurstFx(0xffd23f, 1.6);
+          showMsg('Sunstrike!');
+        }
+      }
+    } else { showMsg('Miss!'); }
   } else {
     const fx=-Math.sin(player.yaw), fz=-Math.cos(player.yaw);
-    const mesh = makeIconSprite('✨');
-    mesh.scale.set(0.18,0.18,0.18);
     const glowMat = new THREE.MeshStandardMaterial({ color: def.color, emissive: def.color, emissiveIntensity: 1.2 });
     const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.07,8,8), glowMat);
     bolt.position.set(player.x+fx*0.5, EYE_HEIGHT-0.1, player.z+fz*0.5);
     scene.add(bolt);
     const light = new THREE.PointLight(def.color, 1.0, 2.5, 2);
     bolt.add(light);
-    projectiles.push({ x:player.x+fx*0.5, z:player.z+fz*0.5, vx:fx*def.projSpeed, vz:fz*def.projSpeed, damage:dmg, life:2200, mesh:bolt });
+    const pr = { x:player.x+fx*0.5, z:player.z+fz*0.5, vx:fx*def.projSpeed, vz:fz*def.projSpeed, damage:dmg, life:2200, mesh:bolt };
+
+    // Mage tier>=1: Elemental Alternation - bolts alternate fire/ice
+    if(player.cls==='mage' && weaponTierUnlocked(player,1)){
+      player.boltAlt = 1-player.boltAlt;
+      pr.element = player.boltAlt===0 ? 'fire' : 'ice';
+      glowMat.color.setHex(pr.element==='fire'?0xff7a3d:0x8fe8ff);
+      glowMat.emissive.setHex(pr.element==='fire'?0xff5c1f:0x5fc8ff);
+    }
+    // Necromancer tier>=1: Soul Drain bonus lifesteal on hit
+    if(player.cls==='necromancer' && weaponTierUnlocked(player,1)) pr.soulDrain = true;
+
+    projectiles.push(pr);
+
+    // Ranger tier>=1: Gale Shot - every 5th shot splits into 3 total
+    if(player.cls==='ranger' && weaponTierUnlocked(player,1)){
+      player.hitCounter++;
+      if(player.hitCounter%5===0){
+        volleyAngles(3,0.28).filter(a=>a!==0).forEach(offset=>{
+          const ang=player.yaw+offset;
+          const gfx=-Math.sin(ang), gfz=-Math.cos(ang);
+          const m2 = new THREE.MeshStandardMaterial({ color: def.color, emissive: def.color, emissiveIntensity: 1.2 });
+          const bolt2 = new THREE.Mesh(new THREE.SphereGeometry(0.06,8,8), m2);
+          bolt2.position.set(player.x+gfx*0.5, EYE_HEIGHT-0.1, player.z+gfz*0.5);
+          scene.add(bolt2);
+          projectiles.push({ x:player.x+gfx*0.5, z:player.z+gfz*0.5, vx:gfx*def.projSpeed, vz:gfz*def.projSpeed, damage:dmg, life:2200, mesh:bolt2 });
+        });
+        showMsg('Gale Shot!');
+      }
+    }
   }
 }
+function weaponTierUnlocked(p, minTier){ return p.weaponTier >= minTier; }
 
 /* ---- ally companions (Necromancer's Raise Ally / Beastmaster's Call Companion) ---- */
 function buildAllyMesh(kind){
@@ -1148,36 +1268,92 @@ function trySpecial(){
   if(gameState!=='playing' || player.specialCd > 0) return;
   const def = CLASS_DEFS[player.cls];
   const spec = SPECIAL_DEFS[player.cls];
+  const weapon = WEAPON_TIERS[player.cls][player.weaponTier];
+  const legendary = weaponTierUnlocked(player,2);
+
+  // Beastmaster: if a companion is already out, Discovered-tier Rally Call
+  // replaces re-summoning with an instant bonus attack instead.
+  if(spec.kind==='summon' && player.cls==='beastmaster' && weaponTierUnlocked(player,1)){
+    const existing = allies.find(a=>a.kind===spec.allyKind);
+    if(existing){
+      player.specialCd = Math.max(2000, spec.cooldown*0.4);
+      existing.attackCd = 0;
+      if(wolf.alive && Math.hypot(existing.x-wolf.x, existing.z-wolf.z) <= 1.4){
+        damageWolf(Math.round(existing.dmg*1.5), true);
+      }
+      spawnBurstFx(def.color, 1.0);
+      showMsg('Rally Call!');
+      return;
+    }
+  }
+
   player.specialCd = spec.cooldown;
   daggerSwing = 1;
 
-  if(spec.kind==='burst'){
+  if(spec.kind==='burst' && player.cls==='mage' && legendary){
+    // Mage Legendary: Arcane Nova upgrade - release a ring of homing star-bolts instead of instant radius damage
+    const dmg = specialBurstDamage(weapon.baseDamage, player.skills, null, spec.dmgMult*0.6);
+    const boltCount = 5;
+    for(let i=0;i<boltCount;i++){
+      const ang = (i/boltCount)*Math.PI*2;
+      const fx=Math.cos(ang), fz=Math.sin(ang);
+      const glowMat = new THREE.MeshStandardMaterial({ color:0xffe27a, emissive:0xffe27a, emissiveIntensity:1.3 });
+      const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.06,8,8), glowMat);
+      bolt.position.set(player.x+fx*0.4, EYE_HEIGHT-0.1, player.z+fz*0.4);
+      scene.add(bolt);
+      projectiles.push({ x:player.x+fx*0.4, z:player.z+fz*0.4, vx:fx*6, vz:fz*6, damage:dmg, life:3000, mesh:bolt, homing:true });
+    }
+    spawnBurstFx(0xffe27a, 1.2);
+    showMsg('Arcane Nova!');
+  } else if(spec.kind==='burst'){
+    const radius = (player.cls==='warrior' && legendary) ? spec.radius*1.4 : spec.radius;
     if(wolf.alive){
       const d = Math.hypot(wolf.x-player.x, wolf.z-player.z);
-      if(d <= spec.radius && hasLineOfSight(player.x,player.z,wolf.x,wolf.z)){
-        const dmg = specialBurstDamage(def.dmg, player.skills, player.equipment.weapon, spec.dmgMult);
+      if(d <= radius && hasLineOfSight(player.x,player.z,wolf.x,wolf.z)){
+        const dmg = specialBurstDamage(weapon.baseDamage, player.skills, null, spec.dmgMult);
         damageWolf(dmg);
         if(spec.stunMs) wolf.attackCd = Math.max(wolf.attackCd, spec.stunMs);
-        showMsg(spec.name+'!');
+        // Warrior Legendary: Cleaving Roar adds a knockback push
+        if(player.cls==='warrior' && legendary){
+          const kx=wolf.x-player.x, kz=wolf.z-player.z, kd=Math.hypot(kx,kz)||1;
+          const pushed = collideMove(wolf.x, wolf.z, wolf.x+(kx/kd)*1.5, wolf.z+(kz/kd)*1.5, 0.3);
+          wolf.x=pushed.x; wolf.z=pushed.z;
+          showMsg('Cleaving Roar!');
+        } else {
+          showMsg(spec.name+'!');
+        }
       } else { showMsg(spec.name+' - out of range!'); }
     }
-    spawnBurstFx(def.color, spec.radius);
+    spawnBurstFx(def.color, radius);
   } else if(spec.kind==='volley'){
-    const dmg = computeDamage(def.dmg, player.skills, player.equipment.weapon);
-    volleyAngles(spec.count, spec.spread).forEach(offset=>{
+    const dmg = computeDamage(weapon.baseDamage, player.skills, null);
+    // Ranger Legendary: Phoenix Volley fires more arrows, each with a small splash on impact
+    const count = (player.cls==='ranger' && legendary) ? 5 : spec.count;
+    volleyAngles(count, spec.spread).forEach(offset=>{
       const ang = player.yaw + offset;
       const fx=-Math.sin(ang), fz=-Math.cos(ang);
       const glowMat = new THREE.MeshStandardMaterial({ color: def.color, emissive: def.color, emissiveIntensity: 1.2 });
       const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.06,8,8), glowMat);
       bolt.position.set(player.x+fx*0.5, EYE_HEIGHT-0.1, player.z+fz*0.5);
       scene.add(bolt);
-      projectiles.push({ x:player.x+fx*0.5, z:player.z+fz*0.5, vx:fx*def.projSpeed, vz:fz*def.projSpeed, damage:dmg, life:2200, mesh:bolt });
+      const pr = { x:player.x+fx*0.5, z:player.z+fz*0.5, vx:fx*def.projSpeed, vz:fz*def.projSpeed, damage:dmg, life:2200, mesh:bolt };
+      if(player.cls==='ranger' && legendary) pr.splashOnHit = true;
+      projectiles.push(pr);
     });
-    showMsg(spec.name+'!');
+    showMsg((player.cls==='ranger' && legendary) ? 'Phoenix Volley!' : spec.name+'!');
   } else if(spec.kind==='summon'){
-    const dmg = specialBurstDamage(10, player.skills, player.equipment.weapon, 1.0);
-    spawnAlly(spec.allyKind, spec.durationMs, dmg);
-    showMsg(spec.name+'!');
+    const dmg = specialBurstDamage(10, player.skills, null, 1.0);
+    // Necromancer Legendary: Legion of Bone summons 2 allies with a damage buff
+    const summonTwo = player.cls==='necromancer' && legendary;
+    spawnAlly(spec.allyKind, spec.durationMs, summonTwo?Math.round(dmg*1.3):dmg);
+    if(summonTwo) spawnAlly(spec.allyKind, spec.durationMs, Math.round(dmg*1.3));
+    // Beastmaster Legendary: Primal Surge also buffs the player
+    if(player.cls==='beastmaster' && legendary){
+      player.buffMs = 6000; player.buffDmgMult = 1.25; player.buffSpeedMult = 1.2;
+      showMsg('Primal Surge!');
+    } else {
+      showMsg((summonTwo?'Legion of Bone!':spec.name+'!'));
+    }
   }
 }
 function spawnBurstFx(color, radius){
@@ -1196,6 +1372,7 @@ function update(dtMs){
   const def = CLASS_DEFS[player.cls];
   player.attackCd = Math.max(0, player.attackCd - dtMs);
   player.specialCd = Math.max(0, player.specialCd - dtMs);
+  player.buffMs = Math.max(0, player.buffMs - dtMs);
   daggerSwing = Math.max(0, daggerSwing - dt*3.2);
 
   let fwd=0, strafe=0;
@@ -1205,7 +1382,7 @@ function update(dtMs){
   if(keys.has('a')) strafe-=1;
   fwd += touchMove.f; strafe += touchMove.s;
   const mag=Math.hypot(fwd,strafe);
-  const speed = computeSpeed(def.speed, player.skills, player.equipment.trinket);
+  const speed = computeSpeed(def.speed, player.skills, player.equipment.trinket) * (player.buffMs>0?player.buffSpeedMult:1);
   if(mag>0.01){
     fwd/=Math.max(1,mag); strafe/=Math.max(1,mag);
     const fx=Math.sin(player.yaw)*-1, fz=-Math.cos(player.yaw);
@@ -1218,7 +1395,8 @@ function update(dtMs){
 
   if(wolf.alive){
     wolf.hitFlash = Math.max(0, wolf.hitFlash - dtMs);
-    const step = wolfStep(wolf.x, wolf.z, player.x, player.z, wolf.speed, dt, 0.3);
+    const effSpeed = wolf.speed * (wolf.slowMs>0 ? 0.5 : 1);
+    const step = wolfStep(wolf.x, wolf.z, player.x, player.z, effSpeed, dt, 0.3);
     wolf.x = step.x; wolf.z = step.z;
     wolf.attackCd = Math.max(0, wolf.attackCd - dtMs);
     const d = Math.hypot(player.x-wolf.x, player.z-wolf.z);
@@ -1234,17 +1412,37 @@ function update(dtMs){
 
   // projectiles
   projectiles = projectiles.filter(pr=>{
+    if(pr.homing && wolf.alive){
+      const hx=wolf.x-pr.x, hz=wolf.z-pr.z, hd=Math.hypot(hx,hz)||1;
+      const speed = Math.hypot(pr.vx,pr.vz);
+      pr.vx += (hx/hd)*speed*0.12; pr.vz += (hz/hd)*speed*0.12;
+      const newSpeed=Math.hypot(pr.vx,pr.vz)||1;
+      pr.vx = pr.vx/newSpeed*speed; pr.vz = pr.vz/newSpeed*speed;
+    }
     const next = stepProjectile(pr, dt);
     pr.x=next.x; pr.z=next.z; pr.life-=dtMs;
     pr.mesh.position.set(pr.x, EYE_HEIGHT-0.1, pr.z);
     let alive = pr.life>0 && !isWall(pr.x,pr.z);
     if(alive && wolf.alive && projectileHits(pr.x,pr.z,wolf.x,wolf.z,0.5)){
       damageWolf(pr.damage);
+      if(pr.element==='ice') wolf.slowMs = 2000;
+      if(pr.element==='fire'){ wolf.dotMs = 3000; wolf.dotTickMs = 500; wolf.dotDmg = 3; }
+      if(pr.soulDrain) player.hp = Math.min(player.maxHp, player.hp+3);
+      if(pr.splashOnHit) spawnBurstFx(0xff9d3d, 1.1);
       alive=false;
     }
     if(!alive) scene.remove(pr.mesh);
     return alive;
   });
+
+  // wolf status effects (slow / damage-over-time from Elemental Alternation)
+  if(wolf.alive){
+    wolf.slowMs = Math.max(0, wolf.slowMs-dtMs);
+    if(wolf.dotMs>0){
+      wolf.dotMs -= dtMs; wolf.dotTickMs -= dtMs;
+      if(wolf.dotTickMs<=0){ wolf.dotTickMs=500; if(wolf.alive) damageWolf(wolf.dotDmg); }
+    }
+  }
 
   // loot pickup
   lootDrops = lootDrops.filter(drop=>{
@@ -1252,7 +1450,8 @@ function update(dtMs){
     drop.sprite.position.y = 0.55+bob;
     const d = Math.hypot(player.x-drop.x, player.z-drop.z);
     if(d < 0.6){
-      equipItem(drop.itemId);
+      if(drop.kind==='weapon') equipWeaponTier(drop.tier);
+      else equipItem(drop.itemId);
       scene.remove(drop.sprite); scene.remove(drop.light);
       return false;
     }
@@ -1332,7 +1531,7 @@ buildClassSelect();
 document.getElementById('startBtn').onclick = ()=>{
   player = newPlayer(selectedClass);
   respawnWolf(player);
-  viewmodelGroup = buildViewmodel(selectedClass);
+  viewmodelGroup = buildViewmodel(selectedClass, 0);
   projectiles.forEach(pr=>scene.remove(pr.mesh)); projectiles=[];
   allies.forEach(a=>scene.remove(a.mesh)); allies=[];
   lootDrops.forEach(d=>{ scene.remove(d.sprite); scene.remove(d.light); }); lootDrops=[];
@@ -1360,15 +1559,24 @@ function buildSkillScreen(){
   eqLabel.textContent = 'Equipment (found in the halls)';
   wrap.appendChild(eqLabel);
   const eqRow = document.createElement('div'); eqRow.className='equip-row';
+  const weaponTierColors = ['#b6a9dd','#3aa0ff','#ffc93c'];
   ['weapon','armor','trinket'].forEach(slot=>{
     const slotDiv = document.createElement('div'); slotDiv.className='equip-slot';
+    if(slot==='weapon'){
+      const w = WEAPON_TIERS[player.cls][player.weaponTier];
+      const col = weaponTierColors[player.weaponTier];
+      slotDiv.style.borderColor = col; slotDiv.style.borderStyle='solid';
+      slotDiv.innerHTML = '<div class="equip-icon">'+w.icon+'</div><div class="equip-name" style="color:'+col+'">'+w.name+'</div>';
+      eqRow.appendChild(slotDiv);
+      return;
+    }
     const itemId = player.equipment[slot];
     if(itemId){
       const item = EQUIPMENT_DEFS[itemId];
       slotDiv.style.borderColor = RARITY_CSS[item.rarity]; slotDiv.style.borderStyle='solid';
       slotDiv.innerHTML = '<div class="equip-icon">'+item.icon+'</div><div class="equip-name" style="color:'+RARITY_CSS[item.rarity]+'">'+item.name+'</div>';
     } else {
-      const placeholder = slot==='weapon'?'🗡️':slot==='armor'?'🛡️':'💍';
+      const placeholder = slot==='armor'?'🛡️':'💍';
       slotDiv.innerHTML = '<div class="equip-icon" style="opacity:.3">'+placeholder+'</div><div class="equip-name">Empty</div>';
     }
     eqRow.appendChild(slotDiv);
@@ -1431,15 +1639,15 @@ requestAnimationFrame(loop);
 window.__GAME3D_DEBUG__ = {
   getMAP:()=>MAP, getMAP_W:()=>MAP_W, getMAP_H:()=>MAP_H,
   isWall, collideMove, hasLineOfSight, findOpenCells, wolfStep, randomOpenCell,
-  CLASS_DEFS, SKILL_DEFS, EQUIPMENT_DEFS, SPECIAL_DEFS, LEVEL_DEFS, THEME_DEFS,
+  CLASS_DEFS, SKILL_DEFS, EQUIPMENT_DEFS, SPECIAL_DEFS, LEVEL_DEFS, THEME_DEFS, WEAPON_TIERS,
   computeMaxHp, computeDamage, computeSpeed, computeCooldown,
   computeLifesteal, xpForLevel, applyXp, spendSkillPoint, rescaleHpForNewMax, rollLootRarity, pickItemOfRarity,
-  stepProjectile, projectileHits, volleyAngles, specialBurstDamage,
+  stepProjectile, projectileHits, volleyAngles, specialBurstDamage, rollLootKind, weaponTierForRarity,
   getPlayer:()=>player, getWolf:()=>wolf, getAllies:()=>allies, getProjectiles:()=>projectiles,
   getLevelIndex:()=>levelIndex, getKillsThisLevel:()=>killsThisLevel, getLoopCount:()=>loopCount,
   getKills:()=>kills, getLootDrops:()=>lootDrops,
   newPlayer, update, tryAttack, trySpecial, buildClassSelect, buildSkillScreen,
-  buildLevelGeometry, advanceLevel, damageWolf,
+  buildLevelGeometry, advanceLevel, damageWolf, equipWeaponTier, spawnLootDrop,
   setGameState:(s)=>{gameState=s;}, setRunning:(r)=>{running=r;}, setSelectedClass:(c)=>{selectedClass=c;}
 };
 })();
