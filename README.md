@@ -12,21 +12,31 @@ Hosted for free on GitHub Pages: enable it in Settings → Pages → Deploy from
 
 ## Choose your hero
 
-Five classes, each with real stat and playstyle differences:
+Five classes, each with real stat differences, a distinct attack, and a unique special ability (E / right-click on desktop, ✨ button on mobile):
 
-| Class | Attack | Style |
+| Class | Attack | Special |
 |---|---|---|
-| Warrior | Melee | Tanky, high HP, short-range heavy blade |
-| Mage | Ranged bolt | Glass cannon, strong burst damage |
-| Ranger | Ranged bolt | Fastest, longest range, lower damage |
-| Necromancer | Ranged bolt | Balanced dark-magic damage dealer |
-| Beastmaster | Melee | Tough with the longest melee reach |
+| Warrior | Melee | Shield Bash — radius damage + stuns the target |
+| Mage | Ranged bolt | Arcane Nova — bigger radius burst |
+| Ranger | Ranged bolt | Volley — fires 3 bolts in a spread |
+| Necromancer | Ranged bolt | Raise Ally — summons a skeleton that fights alongside you |
+| Beastmaster | Melee | Call Companion — summons a wolf pup ally |
 
 ## Controls
 
-**Desktop:** WASD to move, mouse to look (click to lock your cursor), click or Space to attack, Esc to release the cursor, ⭐ to open the skill tree.
+**Desktop:** WASD to move, mouse to look (click to lock your cursor), click or Space to attack, E or right-click for your special, Esc to release the cursor, ⭐ to open the skill tree.
 
-**Mobile / touch:** left analog joystick to move, drag anywhere else to look, ⚔ button to attack, ⭐ button for the skill tree. Controls are dual-touch aware (hold the joystick with one thumb, look with the other) and use safe-area-aware sizing so they don't get clipped on small phone screens.
+**Mobile / touch:** left analog joystick (vertically centered on the left edge) to move, drag anywhere else to look, ⚔/✨ buttons (vertically centered on the right edge) for attack/special, ⭐ button for the skill tree. Controls are dual-touch aware (hold the joystick with one thumb, look/attack with the other) and use safe-area-aware, viewport-relative sizing so they scale properly on small phone screens instead of clipping.
+
+## Progression: levels & story
+
+The dungeon isn't the whole game — defeating enough wolves in an area opens the way to the next:
+
+1. **Dungeon Depths** — a dense, dark maze lit by flickering torches
+2. **Sunlit Grove** — a bright, open outdoor area with scattered trees, under real sky lighting
+3. **Castle Courtyard** — a semi-open colonnaded ruin
+
+After the Castle Courtyard, the loop continues back to the Dungeon with tougher wolves, so there's always a next fight. Each level has its own lighting, fog, wall/floor textures, and layout density — not every level is a cramped corridor maze.
 
 ## Progression systems
 
@@ -37,12 +47,14 @@ Five classes, each with real stat and playstyle differences:
 ## Features
 
 - Real WebGL 3D scene: procedurally-textured brick walls and stone floor (canvas-generated, no external image files), fog for depth, ceiling beams
-- Dynamic point-light torches with wall brackets and flickering flame props that cast real shadows
-- Environment props for visual variety: barrels, crates, rubble piles, and columns scattered through the maze
+- 3 distinct levels with different themes (dark dungeon, bright open grove, semi-open castle courtyard) and progression gated by kill count, with looping difficulty scaling
+- Dynamic point-light torches with wall brackets and flickering flame props that cast real shadows (dungeon/castle levels)
+- Environment props for visual variety: barrels, crates, rubble piles, and columns scattered through each level
 - A low-poly 3D wolf enemy with a walk cycle that turns to face you and chases based on line-of-sight-aware AI
-- Per-class first-person viewmodels (sword, staff, bow, tome, coiled whip) and ranged spell/arrow projectiles for casters
+- Per-class first-person viewmodels with real detail (wrapped grips, gems, coiled wire, fletched arrows, a skull-topped necromancer staff) and ranged bolt projectiles for casters
+- A shared ally-companion system powering the Necromancer's and Beastmaster's summon specials
 - Minimap overlay showing the maze layout and live positions
-- Fully separated architecture: all gameplay rules (movement, collision, line-of-sight, enemy AI, XP/skills/loot math) are pure functions independent of Three.js — the rendering layer only ever *reads* game state, it never owns game logic
+- Fully separated architecture: all gameplay rules (movement, collision, line-of-sight, enemy AI, XP/skills/loot/specials math) are pure functions independent of Three.js — the rendering layer only ever *reads* game state, it never owns game logic
 
 ## Project structure
 

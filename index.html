@@ -121,23 +121,28 @@
 
   .touch-only{ display:none; }
   .desktop-only{ display:block; }
-  @media (pointer:coarse){ .touch-only{ display:block; } .desktop-only{ display:none; } }
+  @media (pointer:coarse){ .touch-only{ display:flex; } .desktop-only{ display:none; } }
   #touchLook{ position:absolute; inset:0; z-index:4; touch-action:none; }
   .joy-base{
-    position:absolute; left:calc(14px + env(safe-area-inset-left,0px)); bottom:calc(14px + env(safe-area-inset-bottom,0px));
-    width:clamp(84px,26vh,120px); height:clamp(84px,26vh,120px); border-radius:50%;
+    position:absolute; left:calc(16px + env(safe-area-inset-left,0px)); top:50%; transform:translateY(-50%);
+    width:clamp(84px,24vh,120px); height:clamp(84px,24vh,120px); border-radius:50%;
     background:rgba(255,255,255,.08); border:2px solid rgba(255,255,255,.28); z-index:7; touch-action:none;
   }
   .joy-knob{
     position:absolute; width:42%; height:42%; border-radius:50%; left:29%; top:29%;
     background:rgba(255,207,92,.4); border:2px solid rgba(255,207,92,.75); pointer-events:none;
   }
-  #tAttack{
-    position:absolute; right:calc(14px + env(safe-area-inset-right,0px)); bottom:calc(14px + env(safe-area-inset-bottom,0px));
-    width:clamp(58px,17vh,76px); height:clamp(58px,17vh,76px); border-radius:50%; z-index:7;
-    background:rgba(255,92,108,.32); border:2px solid rgba(255,92,108,.75); color:#fff;
-    display:flex; align-items:center; justify-content:center; font-size:clamp(1rem,4vh,1.4rem); user-select:none; touch-action:none;
+  #rightControls{
+    position:absolute; right:calc(16px + env(safe-area-inset-right,0px)); top:50%; transform:translateY(-50%);
+    z-index:7; flex-direction:column; align-items:center; gap:14px;
   }
+  #tAttack, #tSpecial{
+    width:clamp(56px,16vh,72px); height:clamp(56px,16vh,72px); border-radius:50%;
+    color:#fff; display:flex; align-items:center; justify-content:center;
+    font-size:clamp(.95rem,3.6vh,1.3rem); user-select:none; touch-action:none;
+  }
+  #tAttack{ background:rgba(255,92,108,.32); border:2px solid rgba(255,92,108,.75); }
+  #tSpecial{ background:rgba(79,216,196,.3); border:2px solid rgba(79,216,196,.75); }
   #rotateDeviceNote{
     display:none; position:absolute; inset:0; z-index:25; background:#0c0716;
     align-items:center; justify-content:center; text-align:center; padding:20px;
@@ -167,7 +172,7 @@
   </div>
 
   <div id="msg"></div>
-  <div id="controls-note" class="desktop-only">WASD move · mouse look (click to lock) · click/Space attack · Esc releases mouse · ⭐ skill tree</div>
+  <div id="controls-note" class="desktop-only">WASD move · mouse look (click to lock) · click/Space attack · E/right-click special · Esc releases mouse · ⭐ skill tree</div>
   <div id="lockPrompt" class="hidden">Click anywhere to look around</div>
   <div id="rotateDeviceNote">Rotate your device to landscape 🐉<br>for the full 3D view</div>
 
@@ -188,7 +193,10 @@
   <div id="loadError">3D rendering library failed to load — this needs an internet connection to fetch Three.js from a CDN. Please check your connection and reload.</div>
 
   <div class="joy-base touch-only" id="joyBase"><div class="joy-knob" id="joyKnob"></div></div>
-  <div class="touch-only" id="tAttack">⚔</div>
+  <div id="rightControls" class="touch-only">
+    <div id="tSpecial">✨</div>
+    <div id="tAttack">⚔</div>
+  </div>
 </div>
 
 <script>
@@ -202,23 +210,83 @@ if(typeof THREE === 'undefined'){
 }
 
 /* ================= PURE GAMEPLAY LOGIC: world/movement/AI (unit-tested independently) ================= */
-const MAP_ROWS = [
-"1111111111111",
-"1000000000001",
-"1011101110101",
-"1010001000101",
-"1010111110101",
-"1010100000101",
-"1010101111101",
-"1000101000001",
-"1110101011101",
-"1000001010001",
-"1011111010111",
-"1000000010001",
-"1111111111111",
+const LEVEL_DEFS = [
+  {
+    id:'dungeon', name:'Dungeon Depths', theme:'dungeon', killsToAdvance:5,
+    introText:'You descend into the ancient dungeon. Something is stirring in the dark...',
+    mapRows:[
+      "1111111111111",
+      "1000000000001",
+      "1011101110101",
+      "1010001000101",
+      "1010111110101",
+      "1010100000101",
+      "1010101111101",
+      "1000101000001",
+      "1110101011101",
+      "1000001010001",
+      "1011111010111",
+      "1000000010001",
+      "1111111111111",
+    ],
+  },
+  {
+    id:'grove', name:'Sunlit Grove', theme:'open', killsToAdvance:5,
+    introText:'A hidden passage opens into a bright, overgrown grove. The wolves here roam free under open sky.',
+    mapRows:[
+      "1111111111111",
+      "1000000000001",
+      "1000100010001",
+      "1000000000001",
+      "1010000000101",
+      "1000001000001",
+      "1000010100001",
+      "1000001000001",
+      "1010000000101",
+      "1000000000001",
+      "1000100010001",
+      "1000000000001",
+      "1111111111111",
+    ],
+  },
+  {
+    id:'courtyard', name:'Castle Courtyard', theme:'castle', killsToAdvance:6,
+    introText:'You emerge into the ruined courtyard of an old castle, its columned halls open to the sky.',
+    mapRows:[
+      "1111111111111",
+      "1000000000001",
+      "1010101010101",
+      "1000000000001",
+      "1000000000001",
+      "1010101010101",
+      "1000000000001",
+      "1000000000001",
+      "1010101010101",
+      "1000000000001",
+      "1000000000001",
+      "1000000000001",
+      "1111111111111",
+    ],
+  },
 ];
-const MAP = MAP_ROWS.map(row => row.split('').map(Number));
-const MAP_W = MAP[0].length, MAP_H = MAP.length;
+const THEME_DEFS = {
+  dungeon: { wallColor:0x5a4028, floorColor:0x2a2018, ceilColor:0x15101f, ambientColor:0x2a2440, ambientIntensity:1.1,
+             hemiSky:0x4a3a6a, hemiGround:0x1a1020, hemiIntensity:0.5, fogColor:0x0c0716, fogNear:3, fogFar:15,
+             useTorches:true, hasCeiling:true, useColumns:false },
+  open:    { wallColor:0x4a6a3a, floorColor:0x3a6a2a, ceilColor:0x87ceeb, ambientColor:0x9ab8a8, ambientIntensity:1.7,
+             hemiSky:0xcfe8ff, hemiGround:0x3a6a2a, hemiIntensity:1.0, fogColor:0xbfe0ff, fogNear:6, fogFar:26,
+             useTorches:false, hasCeiling:false, useColumns:false },
+  castle:  { wallColor:0x9a8a6a, floorColor:0x7a6a55, ceilColor:0x3a352f, ambientColor:0x6a604a, ambientIntensity:1.35,
+             hemiSky:0x9ab0c0, hemiGround:0x5a5040, hemiIntensity:0.75, fogColor:0x2a2620, fogNear:4, fogFar:20,
+             useTorches:true, hasCeiling:true, useColumns:true },
+};
+
+let MAP, MAP_W, MAP_H;
+function loadLevelMap(levelDef){
+  MAP = levelDef.mapRows.map(row => row.split('').map(Number));
+  MAP_W = MAP[0].length; MAP_H = MAP.length;
+}
+loadLevelMap(LEVEL_DEFS[0]);
 
 function isWall(x, z) {
   const gx = Math.floor(x), gz = Math.floor(z);
@@ -283,6 +351,13 @@ const SKILL_DEFS = {
   vampirism:  { name:'Vampirism',  icon:'🩸', maxRank:3, desc:'Heal 2 HP per rank on hit' },
 };
 const SKILL_ORDER = ['vitality','might','swiftness','focus','vampirism'];
+const SPECIAL_DEFS = {
+  warrior:     { name:'Shield Bash',   cooldown:6000, kind:'burst',  radius:2.4, dmgMult:1.3, stunMs:1500 },
+  mage:        { name:'Arcane Nova',   cooldown:7000, kind:'burst',  radius:3.2, dmgMult:1.7 },
+  ranger:      { name:'Volley',        cooldown:6500, kind:'volley', count:3, spread:0.32 },
+  necromancer: { name:'Raise Ally',    cooldown:9000, kind:'summon', allyKind:'skeleton', durationMs:15000 },
+  beastmaster: { name:'Call Companion',cooldown:8000, kind:'summon', allyKind:'wolfpup',  durationMs:16000 },
+};
 const RARITY_COLORS = { common:0xb6a9dd, rare:0x3aa0ff, epic:0xffc93c };
 const RARITY_CSS = { common:'#b6a9dd', rare:'#3aa0ff', epic:'#ffc93c' };
 const EQUIPMENT_DEFS = {
@@ -348,6 +423,16 @@ function pickItemOfRarity(rarity, rngIndexPicker) {
 }
 function stepProjectile(pr, dtSeconds) { return { x: pr.x + pr.vx * dtSeconds, z: pr.z + pr.vz * dtSeconds }; }
 function projectileHits(prX, prZ, tx, tz, hitRadius) { return Math.hypot(prX - tx, prZ - tz) < hitRadius; }
+function volleyAngles(count, spread) {
+  if (count <= 1) return [0];
+  const half = (count - 1) / 2;
+  const out = [];
+  for (let i = 0; i < count; i++) out.push((i - half) * spread);
+  return out;
+}
+function specialBurstDamage(baseDmg, skills, weaponId, dmgMult) {
+  return Math.round(computeDamage(baseDmg, skills, weaponId) * dmgMult);
+}
 
 /* ================= SELECTION / GAME STATE ================= */
 let gameState = 'select'; // 'select' | 'playing'
@@ -356,7 +441,11 @@ let selectedClass = 'warrior';
 let player = null;
 const wolf = { hp: 30, maxHp: 30, alive: true, speed: 1.3, hitFlash: 0, attackCd: 0, x:0, z:0 };
 let kills = 0;
+let levelIndex = 0;
+let killsThisLevel = 0;
+let loopCount = 0;
 let projectiles = [];
+let allies = [];
 let lootDrops = [];
 
 function newPlayer(cls){
@@ -368,14 +457,27 @@ function newPlayer(cls){
   return {
     cls, x:start.x, z:start.z, yaw:0, pitch:0, radius:0.28,
     hp:maxHp, maxHp, baseHp:def.hp,
-    attackCd:0, level:1, xp:0, skillPoints:0, skills, equipment
+    attackCd:0, specialCd:0, level:1, xp:0, skillPoints:0, skills, equipment
   };
 }
 function respawnWolf(nearExclude){
   const spot = randomOpenCell(nearExclude);
   wolf.x = spot.x; wolf.z = spot.z;
-  wolf.maxHp = 30 + (player.level-1)*6;
+  wolf.maxHp = 30 + (player.level-1)*6 + loopCount*20;
   wolf.hp = wolf.maxHp; wolf.alive = true;
+}
+function advanceLevel(){
+  levelIndex++;
+  if(levelIndex >= LEVEL_DEFS.length){ levelIndex = 0; loopCount++; }
+  killsThisLevel = 0;
+  const def = LEVEL_DEFS[levelIndex];
+  buildLevelGeometry(def);
+  const spot = randomOpenCell();
+  player.x = spot.x; player.z = spot.z;
+  respawnWolf(player);
+  wolfMesh.visible = true;
+  showMsg(def.introText);
+  updateHud();
 }
 
 function showMsg(text){
@@ -385,11 +487,12 @@ function showMsg(text){
   showMsg._t=setTimeout(()=>{ el.style.opacity='0'; }, 1400);
 }
 function updateHud(){
+  const levelDef = LEVEL_DEFS[levelIndex];
   document.getElementById('clsLabel').textContent = CLASS_DEFS[player.cls].name+' · Lv '+player.level;
   document.getElementById('hpFill').style.width = Math.max(0,100*player.hp/player.maxHp)+'%';
   document.getElementById('xpFill').style.width = Math.max(0,100*player.xp/xpForLevel(player.level))+'%';
   document.getElementById('lvlLabel').textContent = Math.floor(player.xp)+' / '+xpForLevel(player.level)+' XP';
-  document.getElementById('killDisplay').textContent = 'Wolves defeated: '+kills;
+  document.getElementById('killDisplay').textContent = levelDef.name+': '+killsThisLevel+'/'+levelDef.killsToAdvance+' · Total: '+kills;
   document.getElementById('skillBadge').classList.toggle('hidden', player.skillPoints<=0);
 }
 function refreshMaxHp(){
@@ -428,24 +531,23 @@ function resize(){
 window.addEventListener('resize', resize);
 resize();
 
-// lighting
+// lighting (persistent objects - properties get retuned per theme, not recreated)
 const ambient = new THREE.AmbientLight(0x2a2440, 1.1);
 scene.add(ambient);
 const hemi = new THREE.HemisphereLight(0x4a3a6a, 0x1a1020, 0.5);
 scene.add(hemi);
 
-const torches = [];
-function addTorch(x, z){
+const WALL_H = 2.4;
+function addTorch(x, z, torchList){
   const light = new THREE.PointLight(0xff9a4a, 1.6, 7, 2);
   light.position.set(x, 1.6, z);
-  light.castShadow = torches.length < 2;
+  light.castShadow = torchList.length < 2;
   if(light.castShadow){
     light.shadow.mapSize.set(512,512);
     light.shadow.camera.near = 0.1;
     light.shadow.camera.far = 8;
   }
   scene.add(light);
-  // wall bracket + flame prop so the light source reads as an actual torch
   const bracketMat = new THREE.MeshStandardMaterial({ color:0x2a1f18, roughness:0.9 });
   const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.08,0.3,0.08), bracketMat);
   bracket.position.set(x, 1.35, z);
@@ -454,25 +556,28 @@ function addTorch(x, z){
   const flame = new THREE.Mesh(new THREE.SphereGeometry(0.08,6,6), flameMat);
   flame.position.set(x, 1.62, z);
   scene.add(flame);
-  torches.push({ light, flame, baseIntensity: 1.6, flicker: Math.random()*10 });
+  const entry = { light, flame, bracket, baseIntensity: 1.6, flicker: Math.random()*10 };
+  torchList.push(entry);
+  return entry;
 }
-findOpenCells().filter((c,i)=>i%9===0).slice(0,6).forEach(c=>addTorch(c.x,c.z));
 
-/* ---- procedural textures (canvas-generated, no external image files) ---- */
-function makeBrickTexture(){
+/* ---- procedural textures (canvas-generated, no external image files), parameterized by theme color ---- */
+function hexToRgb(hex){ return { r:(hex>>16)&255, g:(hex>>8)&255, b:hex&255 }; }
+function makeBrickTexture(baseHex){
+  const base = hexToRgb(baseHex);
   const c=document.createElement('canvas'); c.width=128; c.height=128;
   const g=c.getContext('2d');
-  g.fillStyle='#5a4028'; g.fillRect(0,0,128,128);
+  g.fillStyle='rgb('+base.r+','+base.g+','+base.b+')'; g.fillRect(0,0,128,128);
   const bw=32, bh=16;
   for(let row=0; row<128/bh; row++){
     const offset=(row%2===0)?0:bw/2;
     for(let x=-bw; x<128+bw; x+=bw){
       const shade = 6-Math.floor(Math.random()*12);
-      g.fillStyle='rgb('+(90+shade)+','+(64+shade)+','+(40+shade)+')';
+      g.fillStyle='rgb('+(base.r+shade)+','+(base.g+shade)+','+(base.b+shade)+')';
       g.fillRect(x+offset+1,row*bh+1,bw-2,bh-2);
     }
   }
-  g.strokeStyle='rgba(20,14,8,.6)'; g.lineWidth=2;
+  g.strokeStyle='rgba(20,14,8,.5)'; g.lineWidth=2;
   for(let row=0; row<=128/bh; row++){ g.beginPath(); g.moveTo(0,row*bh); g.lineTo(128,row*bh); g.stroke(); }
   for(let row=0; row<128/bh; row++){
     const offset=(row%2===0)?0:bw/2;
@@ -483,67 +588,34 @@ function makeBrickTexture(){
   tex.repeat.set(1,2);
   return tex;
 }
-function makeFloorTexture(){
+function makeFloorTexture(baseHex, mapW, mapH){
+  const base = hexToRgb(baseHex);
   const c=document.createElement('canvas'); c.width=128; c.height=128;
   const g=c.getContext('2d');
-  g.fillStyle='#2a2018'; g.fillRect(0,0,128,128);
+  g.fillStyle='rgb('+base.r+','+base.g+','+base.b+')'; g.fillRect(0,0,128,128);
   const tiles=4, ts=128/tiles;
   for(let ty=0;ty<tiles;ty++) for(let tx=0;tx<tiles;tx++){
     const shade = 8-Math.floor(Math.random()*16);
-    g.fillStyle='rgb('+(42+shade)+','+(32+shade)+','+(24+shade)+')';
+    g.fillStyle='rgb('+(base.r+shade)+','+(base.g+shade)+','+(base.b+shade)+')';
     g.fillRect(tx*ts+1,ty*ts+1,ts-2,ts-2);
   }
-  g.strokeStyle='rgba(10,6,4,.7)'; g.lineWidth=2;
+  g.strokeStyle='rgba(10,6,4,.5)'; g.lineWidth=2;
   for(let i=0;i<=tiles;i++){ g.beginPath(); g.moveTo(i*ts,0); g.lineTo(i*ts,128); g.stroke(); g.beginPath(); g.moveTo(0,i*ts); g.lineTo(128,i*ts); g.stroke(); }
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(MAP_W, MAP_H);
+  tex.repeat.set(mapW, mapH);
   return tex;
 }
-const wallMat = new THREE.MeshStandardMaterial({ map: makeBrickTexture(), roughness: 0.92, metalness: 0.04 });
-const floorMat = new THREE.MeshStandardMaterial({ map: makeFloorTexture(), roughness: 1.0 });
-const ceilMat = new THREE.MeshStandardMaterial({ color: 0x15101f, roughness: 1.0 });
+const wallMat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0.04 });
+const floorMat = new THREE.MeshStandardMaterial({ roughness: 1.0 });
+const ceilMat = new THREE.MeshStandardMaterial({ roughness: 1.0 });
 const beamMat = new THREE.MeshStandardMaterial({ color: 0x2a1f16, roughness: 0.9 });
 const propWoodMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2e, roughness: 0.88 });
-const propDarkMat = new THREE.MeshStandardMaterial({ color: 0x3a2c1e, roughness: 0.9 });
 const rockMat = new THREE.MeshStandardMaterial({ color: 0x4a4640, roughness: 0.95 });
 const columnMat = new THREE.MeshStandardMaterial({ color: 0x554530, roughness: 0.85 });
-
-const floorGeo = new THREE.PlaneGeometry(MAP_W, MAP_H);
-const floorMesh = new THREE.Mesh(floorGeo, floorMat);
-floorMesh.rotation.x = -Math.PI/2;
-floorMesh.position.set(MAP_W/2, 0, MAP_H/2);
-floorMesh.receiveShadow = true;
-scene.add(floorMesh);
-
-const WALL_H = 2.4;
-const ceilGeo = new THREE.PlaneGeometry(MAP_W, MAP_H);
-const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
-ceiling.rotation.x = Math.PI/2;
-ceiling.position.set(MAP_W/2, WALL_H, MAP_H/2);
-scene.add(ceiling);
-// ceiling cross-beams for visual detail/scale reference
-for(let x=1; x<MAP_W; x+=3){
-  const beam = new THREE.Mesh(new THREE.BoxGeometry(0.14,0.14,MAP_H), beamMat);
-  beam.position.set(x, WALL_H-0.08, MAP_H/2);
-  scene.add(beam);
-}
-
 const wallGeo = new THREE.BoxGeometry(1, WALL_H, 1);
-const wallGroup = new THREE.Group();
-for(let z=0; z<MAP_H; z++){
-  for(let x=0; x<MAP_W; x++){
-    if(MAP[z][x] > 0){
-      const mesh = new THREE.Mesh(wallGeo, wallMat);
-      mesh.position.set(x+0.5, WALL_H/2, z+0.5);
-      mesh.castShadow = true; mesh.receiveShadow = true;
-      wallGroup.add(mesh);
-    }
-  }
-}
-scene.add(wallGroup);
 
-/* ---- environment props for visual variety ---- */
+/* ---- environment props for visual variety (each returns its root object(s) for cleanup) ---- */
 function addBarrel(x,z){
   const g=new THREE.Group();
   const body=new THREE.Mesh(new THREE.CylinderGeometry(0.28,0.3,0.55,10), propWoodMat);
@@ -552,6 +624,7 @@ function addBarrel(x,z){
   [0.12,0.44].forEach(y=>{ const band=new THREE.Mesh(new THREE.TorusGeometry(0.29,0.02,6,12), bandMat); band.rotation.x=Math.PI/2; band.position.y=y; g.add(band); });
   g.position.set(x,0,z);
   scene.add(g);
+  return [g];
 }
 function addCrate(x,z,rot){
   const crate=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.5,0.5), propWoodMat);
@@ -561,15 +634,19 @@ function addCrate(x,z,rot){
   const trim=new THREE.Mesh(new THREE.BoxGeometry(0.52,0.05,0.52), trimMat);
   trim.position.set(x,0.25,z); trim.rotation.y=rot||0.3;
   scene.add(trim);
+  return [crate, trim];
 }
 function addRubble(x,z){
+  const rocks=[];
   for(let i=0;i<4;i++){
     const rock=new THREE.Mesh(new THREE.IcosahedronGeometry(0.12+Math.random()*0.12,0), rockMat);
     rock.position.set(x+(Math.random()-0.5)*0.5, 0.1, z+(Math.random()-0.5)*0.5);
     rock.rotation.set(Math.random()*Math.PI,Math.random()*Math.PI,Math.random()*Math.PI);
     rock.castShadow=true;
     scene.add(rock);
+    rocks.push(rock);
   }
+  return rocks;
 }
 function addColumn(x,z){
   const col=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.24,WALL_H,10), columnMat);
@@ -578,12 +655,83 @@ function addColumn(x,z){
   const cap=new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.24,0.12,10), columnMat);
   cap.position.set(x,WALL_H-0.06,z);
   scene.add(cap);
+  return [col, cap];
 }
-const propCells = findOpenCells();
-propCells.filter((c,i)=>i%7===3).slice(0,5).forEach(c=>addBarrel(c.x+0.25,c.z+0.25));
-propCells.filter((c,i)=>i%11===5).slice(0,4).forEach((c,i)=>addCrate(c.x-0.2,c.z-0.2,i*0.4));
-propCells.filter((c,i)=>i%13===2).slice(0,3).forEach(c=>addRubble(c.x,c.z));
-propCells.filter((c,i)=>i%17===7).slice(0,2).forEach(c=>addColumn(c.x,c.z));
+
+/* ---- level geometry: builds/tears down everything MAP-dependent ---- */
+let currentLevel = { wallGroup:null, floorMesh:null, ceilingMesh:null, beams:[], torches:[], props:[] };
+function clearCurrentLevel(){
+  const o = currentLevel;
+  if(o.wallGroup) scene.remove(o.wallGroup);
+  if(o.floorMesh) scene.remove(o.floorMesh);
+  if(o.ceilingMesh) scene.remove(o.ceilingMesh);
+  o.beams.forEach(b=>scene.remove(b));
+  o.torches.forEach(t=>{ scene.remove(t.light); scene.remove(t.flame); scene.remove(t.bracket); });
+  o.props.forEach(p=>scene.remove(p));
+}
+function buildLevelGeometry(levelDef){
+  clearCurrentLevel();
+  loadLevelMap(levelDef);
+  const theme = THEME_DEFS[levelDef.theme];
+
+  scene.fog.color.setHex(theme.fogColor); scene.fog.near=theme.fogNear; scene.fog.far=theme.fogFar;
+  scene.background.setHex(theme.fogColor);
+  ambient.color.setHex(theme.ambientColor); ambient.intensity=theme.ambientIntensity;
+  hemi.color.setHex(theme.hemiSky); hemi.groundColor.setHex(theme.hemiGround); hemi.intensity=theme.hemiIntensity;
+
+  wallMat.map = makeBrickTexture(theme.wallColor); wallMat.needsUpdate = true;
+  floorMat.map = makeFloorTexture(theme.floorColor, MAP_W, MAP_H); floorMat.needsUpdate = true;
+  ceilMat.color.setHex(theme.ceilColor);
+
+  const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(MAP_W, MAP_H), floorMat);
+  floorMesh.rotation.x = -Math.PI/2;
+  floorMesh.position.set(MAP_W/2, 0, MAP_H/2);
+  floorMesh.receiveShadow = true;
+  scene.add(floorMesh);
+
+  const ceilingMesh = new THREE.Mesh(new THREE.PlaneGeometry(MAP_W, MAP_H), ceilMat);
+  ceilingMesh.rotation.x = Math.PI/2;
+  ceilingMesh.position.set(MAP_W/2, WALL_H, MAP_H/2);
+  ceilingMesh.visible = theme.hasCeiling;
+  scene.add(ceilingMesh);
+
+  const beams = [];
+  if(theme.hasCeiling){
+    for(let x=1; x<MAP_W; x+=3){
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(0.14,0.14,MAP_H), beamMat);
+      beam.position.set(x, WALL_H-0.08, MAP_H/2);
+      scene.add(beam); beams.push(beam);
+    }
+  }
+
+  const wallGroup = new THREE.Group();
+  for(let z=0; z<MAP_H; z++){
+    for(let x=0; x<MAP_W; x++){
+      if(MAP[z][x] > 0){
+        const mesh = new THREE.Mesh(wallGeo, wallMat);
+        mesh.position.set(x+0.5, WALL_H/2, z+0.5);
+        mesh.castShadow = true; mesh.receiveShadow = true;
+        wallGroup.add(mesh);
+      }
+    }
+  }
+  scene.add(wallGroup);
+
+  const torches = [];
+  if(theme.useTorches){
+    findOpenCells().filter((c,i)=>i%9===0).slice(0,6).forEach(c=>addTorch(c.x,c.z,torches));
+  }
+
+  const props = [];
+  const propCells = findOpenCells();
+  propCells.filter((c,i)=>i%7===3).slice(0,5).forEach(c=>props.push(...addBarrel(c.x+0.25,c.z+0.25)));
+  propCells.filter((c,i)=>i%11===5).slice(0,4).forEach((c,i)=>props.push(...addCrate(c.x-0.2,c.z-0.2,i*0.4)));
+  propCells.filter((c,i)=>i%13===2).slice(0,3).forEach(c=>props.push(...addRubble(c.x,c.z)));
+  if(theme.useColumns) propCells.filter((c,i)=>i%17===7).slice(0,3).forEach(c=>props.push(...addColumn(c.x,c.z)));
+
+  currentLevel = { wallGroup, floorMesh, ceilingMesh, beams, torches, props };
+}
+buildLevelGeometry(LEVEL_DEFS[0]);
 
 /* ---- wolf enemy (low-poly 3D, not a billboard) ---- */
 function buildWolf(){
@@ -625,37 +773,129 @@ scene.add(wolfMesh);
 /* ---- per-class first-person viewmodel ---- */
 function buildViewmodel(cls){
   const g = new THREE.Group();
-  const metalMat = new THREE.MeshStandardMaterial({ color: 0xd8d8d0, metalness: 0.6, roughness: 0.3 });
+  const metalMat = new THREE.MeshStandardMaterial({ color: 0xd8d8d0, metalness: 0.7, roughness: 0.25 });
+  const darkMetalMat = new THREE.MeshStandardMaterial({ color: 0x4a4640, metalness: 0.6, roughness: 0.4 });
   const woodMat = new THREE.MeshStandardMaterial({ color: 0x5a3a1e, roughness: 0.8 });
+  const wrapMat = new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.9 });
+  const goldMat = new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 0.75, roughness: 0.3 });
+  const boneMat = new THREE.MeshStandardMaterial({ color: 0xe6e6da, roughness: 0.7 });
   const classColor = CLASS_DEFS[cls].color;
-  const glowMat = new THREE.MeshStandardMaterial({ color: classColor, emissive: classColor, emissiveIntensity: 0.9 });
+  const glowMat = new THREE.MeshStandardMaterial({ color: classColor, emissive: classColor, emissiveIntensity: 1.0 });
+  const gemMat = new THREE.MeshStandardMaterial({ color: classColor, emissive: classColor, emissiveIntensity: 0.7, metalness:0.3, roughness:0.2 });
 
   if(cls==='warrior'){
-    const blade = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.42, 4), metalMat);
-    blade.rotation.x = Math.PI/2; blade.position.set(0,0,-0.26);
-    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.16,0.03,0.03), woodMat);
-    guard.position.set(0,0,-0.02);
-    const hilt = new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.035,0.16,6), woodMat);
-    hilt.rotation.x = Math.PI/2; hilt.position.set(0,0,0.06);
-    g.add(blade,guard,hilt);
-  } else if(cls==='mage' || cls==='necromancer'){
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.018,0.022,0.55,6), woodMat);
+    // blade with a raised fuller (groove) for definition
+    const blade = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.46, 4), metalMat);
+    blade.rotation.x = Math.PI/2; blade.position.set(0,0,-0.28);
+    const fuller = new THREE.Mesh(new THREE.BoxGeometry(0.012,0.012,0.34), darkMetalMat);
+    fuller.position.set(0,0,-0.24);
+    // crossguard
+    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.2,0.035,0.045), goldMat);
+    guard.position.set(0,0,-0.03);
+    // wrapped leather grip (stacked thin rings)
+    const gripCore = new THREE.Mesh(new THREE.CylinderGeometry(0.028,0.03,0.17,8), woodMat);
+    gripCore.rotation.x = Math.PI/2; gripCore.position.set(0,0,0.07);
+    const wraps = new THREE.Group();
+    for(let i=0;i<6;i++){
+      const wrap = new THREE.Mesh(new THREE.TorusGeometry(0.03,0.008,5,10), wrapMat);
+      wrap.rotation.y = Math.PI/2; wrap.position.set(0,0,0.005+i*0.026);
+      wraps.add(wrap);
+    }
+    // pommel with a gem
+    const pommel = new THREE.Mesh(new THREE.SphereGeometry(0.035,8,8), goldMat);
+    pommel.position.set(0,0,0.16);
+    const gem = new THREE.Mesh(new THREE.SphereGeometry(0.016,6,6), gemMat);
+    gem.position.set(0,0,0.175);
+    g.add(blade,fuller,guard,gripCore,wraps,pommel,gem);
+
+  } else if(cls==='mage'){
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.025,0.58,8), woodMat);
     shaft.rotation.x = Math.PI/2; shaft.position.set(0,0,-0.05);
-    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.05,8,8), glowMat);
-    orb.position.set(0,0,-0.32);
-    g.add(shaft,orb);
+    // decorative wire coils along the shaft
+    const coils = new THREE.Group();
+    for(let i=0;i<4;i++){
+      const coil = new THREE.Mesh(new THREE.TorusGeometry(0.028,0.005,5,10), goldMat);
+      coil.rotation.y = Math.PI/2; coil.position.set(0,0,-0.28+i*0.07);
+      coils.add(coil);
+    }
+    // claw-like prongs cradling the orb
+    const prongMat = goldMat;
+    [0,1,2].forEach(i=>{
+      const a = i*Math.PI*2/3;
+      const prong = new THREE.Mesh(new THREE.ConeGeometry(0.008,0.09,4), prongMat);
+      prong.position.set(Math.cos(a)*0.03,Math.sin(a)*0.03,-0.35);
+      prong.rotation.x = Math.PI*0.42;
+      coils.add(prong);
+    });
+    const orbOuter = new THREE.Mesh(new THREE.SphereGeometry(0.06,10,10), glowMat);
+    orbOuter.position.set(0,0,-0.37);
+    const orbCore = new THREE.Mesh(new THREE.SphereGeometry(0.03,8,8), new THREE.MeshStandardMaterial({color:0xffffff,emissive:0xffffff,emissiveIntensity:1.2}));
+    orbCore.position.set(0,0,-0.37);
+    g.add(shaft,coils,orbOuter,orbCore);
+
+  } else if(cls==='necromancer'){
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.018,0.024,0.56,8), boneMat);
+    shaft.rotation.x = Math.PI/2; shaft.position.set(0,0,-0.05);
+    // wrapped dark bindings
+    const bindings = new THREE.Group();
+    for(let i=0;i<3;i++){
+      const b = new THREE.Mesh(new THREE.TorusGeometry(0.026,0.006,5,10), wrapMat);
+      b.rotation.y = Math.PI/2; b.position.set(0,0,-0.05+i*0.09);
+      bindings.add(b);
+    }
+    // small skull topper instead of a plain orb
+    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.05,8,8), boneMat);
+    skull.position.set(0,0,-0.35);
+    const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.05,0.02,0.03), boneMat);
+    jaw.position.set(0,-0.035,-0.33);
+    const eyeGlowMat = new THREE.MeshStandardMaterial({ color:classColor, emissive:classColor, emissiveIntensity:1.3 });
+    [-0.018,0.018].forEach(dx=>{ const eye=new THREE.Mesh(new THREE.SphereGeometry(0.01,6,6), eyeGlowMat); eye.position.set(dx,0.005,-0.31); bindings.add(eye); });
+    g.add(shaft,bindings,skull,jaw);
+
   } else if(cls==='ranger'){
-    const bow = new THREE.Mesh(new THREE.TorusGeometry(0.22,0.014,6,12,Math.PI), woodMat);
+    const bow = new THREE.Mesh(new THREE.TorusGeometry(0.23,0.016,6,14,Math.PI), woodMat);
     bow.rotation.y = Math.PI/2; bow.position.set(0,0,-0.1);
-    const string = new THREE.Mesh(new THREE.CylinderGeometry(0.004,0.004,0.44,4), metalMat);
+    // grip wrap at the bow's midpoint
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.024,0.024,0.09,8), wrapMat);
+    grip.position.set(0,-0.23,-0.1);
+    // tip caps (nocks) at each end of the limbs
+    const nockMat = darkMetalMat;
+    const nock1 = new THREE.Mesh(new THREE.SphereGeometry(0.02,6,6), nockMat); nock1.position.set(0,0.23,-0.1);
+    const nock2 = new THREE.Mesh(new THREE.SphereGeometry(0.02,6,6), nockMat); nock2.position.set(0,-0.23,-0.1);
+    const string = new THREE.Mesh(new THREE.CylinderGeometry(0.004,0.004,0.46,4), metalMat);
     string.rotation.x = Math.PI/2; string.position.set(0,0,-0.1);
-    g.add(bow,string);
+    // nocked arrow
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.006,0.006,0.4,6), woodMat);
+    shaft.rotation.x = Math.PI/2; shaft.position.set(0,0,-0.22);
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.014,0.06,4), darkMetalMat);
+    head.rotation.x = -Math.PI/2; head.position.set(0,0,-0.44);
+    const fletchMat = new THREE.MeshStandardMaterial({ color:0xc0504f, roughness:0.8 });
+    [0,1,2].forEach(i=>{
+      const a=i*Math.PI*2/3;
+      const fletch = new THREE.Mesh(new THREE.BoxGeometry(0.002,0.05,0.025), fletchMat);
+      fletch.position.set(Math.cos(a)*0.012,Math.sin(a)*0.012,-0.02);
+      fletch.rotation.z = a;
+      shaft.add(fletch);
+    });
+    g.add(bow,grip,nock1,nock2,string,shaft,head);
+
   } else if(cls==='beastmaster'){
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.025,0.03,0.16,6), woodMat);
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.028,0.032,0.17,8), woodMat);
     handle.rotation.x = Math.PI/2; handle.position.set(0,0,0.08);
-    const coil = new THREE.Mesh(new THREE.TorusGeometry(0.14,0.012,6,16,Math.PI*1.7), propWoodMat);
+    const wraps = new THREE.Group();
+    for(let i=0;i<5;i++){
+      const wrap = new THREE.Mesh(new THREE.TorusGeometry(0.033,0.007,5,10), wrapMat);
+      wrap.rotation.y = Math.PI/2; wrap.position.set(0,0,0.01+i*0.03);
+      wraps.add(wrap);
+    }
+    const pommelCap = new THREE.Mesh(new THREE.SphereGeometry(0.032,8,8), darkMetalMat);
+    pommelCap.position.set(0,0,0.17);
+    // coiled whip body tapering to a tail
+    const coil = new THREE.Mesh(new THREE.TorusGeometry(0.15,0.013,6,18,Math.PI*1.7), propWoodMat);
     coil.position.set(0,0,-0.2);
-    g.add(handle,coil);
+    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.012,0.14,6), propWoodMat);
+    tail.rotation.z = Math.PI/2; tail.position.set(-0.14,0.08,-0.24);
+    g.add(handle,wraps,pommelCap,coil,tail);
   }
   return g;
 }
@@ -705,6 +945,7 @@ const keys = new Set();
 window.addEventListener('keydown', e=>{
   keys.add(e.key.toLowerCase());
   if(e.key===' ') tryAttack();
+  if(e.key.toLowerCase()==='e') trySpecial();
 });
 window.addEventListener('keyup', e=>keys.delete(e.key.toLowerCase()));
 
@@ -717,6 +958,7 @@ if(!isTouchDevice){
     if(!pointerLocked){ domEl.requestPointerLock && domEl.requestPointerLock(); }
     else { tryAttack(); }
   });
+  domEl.addEventListener('contextmenu', e=>{ e.preventDefault(); if(gameState==='playing' && pointerLocked) trySpecial(); });
   document.addEventListener('pointerlockchange', ()=>{
     pointerLocked = document.pointerLockElement === domEl;
     lockPrompt.classList.toggle('hidden', pointerLocked || gameState!=='playing');
@@ -778,26 +1020,38 @@ function bindHold(id, onDown, onUp){
   }
 })();
 bindHold('tAttack', ()=>tryAttack(), ()=>{});
+bindHold('tSpecial', ()=>trySpecial(), ()=>{});
 
 /* ================= ATTACK ================= */
 let daggerSwing = 0;
-function damageWolf(amount){
+function damageWolf(amount, fromAlly){
   wolf.hp -= amount; wolf.hitFlash = 180;
-  const heal = computeLifesteal(player.skills, player.equipment.trinket);
-  if(heal>0) player.hp = Math.min(player.maxHp, player.hp+heal);
+  if(!fromAlly){
+    const heal = computeLifesteal(player.skills, player.equipment.trinket);
+    if(heal>0) player.hp = Math.min(player.maxHp, player.hp+heal);
+  }
   if(wolf.hp<=0){
-    wolf.alive=false; kills++;
+    wolf.alive=false; kills++; killsThisLevel++;
     showMsg('The wolf falls!');
     wolfMesh.visible=false;
     awardXp(12);
     spawnLootDrop(wolf.x, wolf.z);
     updateHud();
-    setTimeout(()=>{
-      if(gameState!=='playing') return;
-      respawnWolf(player);
-      wolfMesh.visible=true;
-      showMsg('A wolf howls nearby...');
-    }, 1400);
+    const levelDef = LEVEL_DEFS[levelIndex];
+    if(killsThisLevel >= levelDef.killsToAdvance){
+      setTimeout(()=>{
+        if(gameState!=='playing') return;
+        showMsg('The way forward opens...');
+        setTimeout(()=>{ if(gameState==='playing') advanceLevel(); }, 1200);
+      }, 1000);
+    } else {
+      setTimeout(()=>{
+        if(gameState!=='playing') return;
+        respawnWolf(player);
+        wolfMesh.visible=true;
+        showMsg('A wolf howls nearby...');
+      }, 1400);
+    }
   }
   updateHud();
 }
@@ -835,11 +1089,113 @@ function tryAttack(){
   }
 }
 
+/* ---- ally companions (Necromancer's Raise Ally / Beastmaster's Call Companion) ---- */
+function buildAllyMesh(kind){
+  const g = new THREE.Group();
+  if(kind==='skeleton'){
+    const boneMat = new THREE.MeshStandardMaterial({ color:0xe6e6da, roughness:0.7 });
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.22,0.36,0.14), boneMat);
+    torso.position.y=0.5; g.add(torso);
+    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.11,8,8), boneMat);
+    skull.position.y=0.76; g.add(skull);
+    [-0.12,0.12].forEach(dx=>{ const leg=new THREE.Mesh(new THREE.BoxGeometry(0.07,0.34,0.07), boneMat); leg.position.set(dx,0.17,0); g.add(leg); });
+    const glowMat = new THREE.MeshStandardMaterial({ color:0x8a5bd6, emissive:0x8a5bd6, emissiveIntensity:0.8 });
+    [-0.04,0.04].forEach(dx=>{ const eye=new THREE.Mesh(new THREE.SphereGeometry(0.02,6,6), glowMat); eye.position.set(dx,0.77,0.09); g.add(eye); });
+  } else {
+    const furMat = new THREE.MeshStandardMaterial({ color:0xc9a876, roughness:0.85 });
+    const darkMat = new THREE.MeshStandardMaterial({ color:0x7a5a3a, roughness:0.85 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.5,0.24,0.24), furMat);
+    body.position.y=0.2; g.add(body);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.18,0.17,0.18), furMat);
+    head.position.set(0.3,0.24,0); g.add(head);
+    [[-0.05,0.06],[0.05,0.06]].forEach(([dz])=>{ const ear=new THREE.Mesh(new THREE.ConeGeometry(0.04,0.08,4),darkMat); ear.position.set(0.28,0.34,dz); g.add(ear); });
+    [[-0.16,0.36],[0.16,0.36],[-0.16,-0.36],[0.16,-0.36]].forEach(([dx,dzMul])=>{
+      const leg=new THREE.Mesh(new THREE.BoxGeometry(0.06,0.18,0.06),darkMat); leg.position.set(dx,0.09,dzMul*0.09); g.add(leg);
+    });
+    const tail=new THREE.Mesh(new THREE.BoxGeometry(0.2,0.05,0.05), furMat); tail.position.set(-0.3,0.22,0); tail.rotation.z=0.3; g.add(tail);
+  }
+  return g;
+}
+function spawnAlly(kind, durationMs, dmg){
+  const fx=-Math.sin(player.yaw), fz=-Math.cos(player.yaw);
+  const spot = { x: player.x+fx*1.1, z: player.z+fz*1.1 };
+  const mesh = buildAllyMesh(kind);
+  mesh.position.set(spot.x,0,spot.z);
+  scene.add(mesh);
+  allies.push({ x:spot.x, z:spot.z, kind, mesh, life:durationMs, dmg, attackCd:0 });
+}
+function updateAllies(dt, dtMs){
+  allies = allies.filter(a=>{
+    a.life -= dtMs;
+    if(a.life<=0){ scene.remove(a.mesh); return false; }
+    if(wolf.alive){
+      const step = wolfStep(a.x, a.z, wolf.x, wolf.z, 1.7, dt, 0.25);
+      a.x = step.x; a.z = step.z;
+      a.attackCd = Math.max(0, a.attackCd-dtMs);
+      if(Math.hypot(a.x-wolf.x, a.z-wolf.z) <= 1.0 && a.attackCd<=0){
+        a.attackCd = 750;
+        damageWolf(a.dmg, true);
+      }
+    }
+    const faceAngle = wolf.alive ? Math.atan2(-(wolf.z-a.z), wolf.x-a.x) : 0;
+    a.mesh.position.set(a.x, 0, a.z);
+    a.mesh.rotation.y = faceAngle;
+    return true;
+  });
+}
+
+function trySpecial(){
+  if(gameState!=='playing' || player.specialCd > 0) return;
+  const def = CLASS_DEFS[player.cls];
+  const spec = SPECIAL_DEFS[player.cls];
+  player.specialCd = spec.cooldown;
+  daggerSwing = 1;
+
+  if(spec.kind==='burst'){
+    if(wolf.alive){
+      const d = Math.hypot(wolf.x-player.x, wolf.z-player.z);
+      if(d <= spec.radius && hasLineOfSight(player.x,player.z,wolf.x,wolf.z)){
+        const dmg = specialBurstDamage(def.dmg, player.skills, player.equipment.weapon, spec.dmgMult);
+        damageWolf(dmg);
+        if(spec.stunMs) wolf.attackCd = Math.max(wolf.attackCd, spec.stunMs);
+        showMsg(spec.name+'!');
+      } else { showMsg(spec.name+' - out of range!'); }
+    }
+    spawnBurstFx(def.color, spec.radius);
+  } else if(spec.kind==='volley'){
+    const dmg = computeDamage(def.dmg, player.skills, player.equipment.weapon);
+    volleyAngles(spec.count, spec.spread).forEach(offset=>{
+      const ang = player.yaw + offset;
+      const fx=-Math.sin(ang), fz=-Math.cos(ang);
+      const glowMat = new THREE.MeshStandardMaterial({ color: def.color, emissive: def.color, emissiveIntensity: 1.2 });
+      const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.06,8,8), glowMat);
+      bolt.position.set(player.x+fx*0.5, EYE_HEIGHT-0.1, player.z+fz*0.5);
+      scene.add(bolt);
+      projectiles.push({ x:player.x+fx*0.5, z:player.z+fz*0.5, vx:fx*def.projSpeed, vz:fz*def.projSpeed, damage:dmg, life:2200, mesh:bolt });
+    });
+    showMsg(spec.name+'!');
+  } else if(spec.kind==='summon'){
+    const dmg = specialBurstDamage(10, player.skills, player.equipment.weapon, 1.0);
+    spawnAlly(spec.allyKind, spec.durationMs, dmg);
+    showMsg(spec.name+'!');
+  }
+}
+function spawnBurstFx(color, radius){
+  const geo = new THREE.TorusGeometry(radius*0.8, 0.03, 6, 24);
+  const mat = new THREE.MeshStandardMaterial({ color, emissive:color, emissiveIntensity:1.0, transparent:true, opacity:0.8 });
+  const ring = new THREE.Mesh(geo, mat);
+  ring.rotation.x = Math.PI/2;
+  ring.position.set(player.x, 0.1, player.z);
+  scene.add(ring);
+  setTimeout(()=>scene.remove(ring), 300);
+}
+
 /* ================= UPDATE ================= */
 function update(dtMs){
   const dt = dtMs/1000;
   const def = CLASS_DEFS[player.cls];
   player.attackCd = Math.max(0, player.attackCd - dtMs);
+  player.specialCd = Math.max(0, player.specialCd - dtMs);
   daggerSwing = Math.max(0, daggerSwing - dt*3.2);
 
   let fwd=0, strafe=0;
@@ -873,6 +1229,8 @@ function update(dtMs){
       updateHud();
     }
   }
+
+  updateAllies(dt, dtMs);
 
   // projectiles
   projectiles = projectiles.filter(pr=>{
@@ -922,12 +1280,18 @@ function update(dtMs){
   viewmodelGroup.position.z = -0.4 + daggerSwing*0.15;
   camera.add(viewmodelGroup);
 
-  torches.forEach(t=>{
+  currentLevel.torches.forEach(t=>{
     t.flicker+=dt*8;
     const val = t.baseIntensity + Math.sin(t.flicker)*0.25 + (Math.random()-0.5)*0.15;
     t.light.intensity = val;
     t.flame.material.emissiveIntensity = 1.0 + Math.sin(t.flicker*1.3)*0.3;
   });
+
+  if(isTouchDevice){
+    const specDef = SPECIAL_DEFS[player.cls];
+    document.getElementById('tSpecial').style.opacity = player.specialCd>0 ? '0.4' : '1';
+    document.getElementById('tAttack').style.opacity = player.attackCd>0 ? '0.55' : '1';
+  }
 }
 
 /* ================= MINIMAP ================= */
@@ -969,12 +1333,15 @@ document.getElementById('startBtn').onclick = ()=>{
   player = newPlayer(selectedClass);
   respawnWolf(player);
   viewmodelGroup = buildViewmodel(selectedClass);
+  projectiles.forEach(pr=>scene.remove(pr.mesh)); projectiles=[];
+  allies.forEach(a=>scene.remove(a.mesh)); allies=[];
+  lootDrops.forEach(d=>{ scene.remove(d.sprite); scene.remove(d.light); }); lootDrops=[];
   document.getElementById('screen-select').classList.add('hidden');
   if(!isTouchDevice) lockPrompt.classList.remove('hidden');
   updateHud();
   gameState = 'playing';
   running = true; last = performance.now();
-  if(isTouchDevice) showMsg('Left stick to move · drag to look · ⚔ to attack');
+  if(isTouchDevice) showMsg('Left stick to move · drag to look · ⚔ attack · ✨ special');
 };
 
 /* ================= SKILL TREE SCREEN ================= */
@@ -1062,11 +1429,17 @@ function loop(now){
 requestAnimationFrame(loop);
 
 window.__GAME3D_DEBUG__ = {
-  MAP, MAP_W, MAP_H, isWall, collideMove, hasLineOfSight, findOpenCells, wolfStep, randomOpenCell,
-  CLASS_DEFS, SKILL_DEFS, EQUIPMENT_DEFS, computeMaxHp, computeDamage, computeSpeed, computeCooldown,
+  getMAP:()=>MAP, getMAP_W:()=>MAP_W, getMAP_H:()=>MAP_H,
+  isWall, collideMove, hasLineOfSight, findOpenCells, wolfStep, randomOpenCell,
+  CLASS_DEFS, SKILL_DEFS, EQUIPMENT_DEFS, SPECIAL_DEFS, LEVEL_DEFS, THEME_DEFS,
+  computeMaxHp, computeDamage, computeSpeed, computeCooldown,
   computeLifesteal, xpForLevel, applyXp, spendSkillPoint, rescaleHpForNewMax, rollLootRarity, pickItemOfRarity,
-  stepProjectile, projectileHits,
-  getPlayer:()=>player, getWolf:()=>wolf, newPlayer, update, tryAttack, buildClassSelect, buildSkillScreen,
+  stepProjectile, projectileHits, volleyAngles, specialBurstDamage,
+  getPlayer:()=>player, getWolf:()=>wolf, getAllies:()=>allies, getProjectiles:()=>projectiles,
+  getLevelIndex:()=>levelIndex, getKillsThisLevel:()=>killsThisLevel, getLoopCount:()=>loopCount,
+  getKills:()=>kills, getLootDrops:()=>lootDrops,
+  newPlayer, update, tryAttack, trySpecial, buildClassSelect, buildSkillScreen,
+  buildLevelGeometry, advanceLevel, damageWolf,
   setGameState:(s)=>{gameState=s;}, setRunning:(r)=>{running=r;}, setSelectedClass:(c)=>{selectedClass=c;}
 };
 })();
