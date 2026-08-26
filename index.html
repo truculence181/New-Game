@@ -497,6 +497,14 @@ function pickItemOfRarity(rarity, rngIndexPicker) {
 }
 function stepProjectile(pr, dtSeconds) { return { x: pr.x + pr.vx * dtSeconds, z: pr.z + pr.vz * dtSeconds }; }
 function projectileHits(prX, prZ, tx, tz, hitRadius) { return Math.hypot(prX - tx, prZ - tz) < hitRadius; }
+function pointLightAttenuation(d, cutoffDistance, decay){
+  let falloff = 1/Math.max(Math.pow(d,decay), 0.01);
+  if(cutoffDistance>0){
+    const ratio = Math.min(Math.max(1-Math.pow(d/cutoffDistance,4),0),1);
+    falloff *= ratio*ratio;
+  }
+  return falloff;
+}
 function volleyAngles(count, spread) {
   if (count <= 1) return [0];
   const half = (count - 1) / 2;
@@ -617,7 +625,7 @@ scene.add(hemi);
 const WALL_H = 2.4;
 function addTorch(x, z, torchList, color){
   color = color!==undefined ? color : 0xff9a4a;
-  const light = new THREE.PointLight(color, 1.6, 7, 2);
+  const light = new THREE.PointLight(color, 1.9, 5.5, 2);
   light.position.set(x, 1.6, z);
   light.castShadow = torchList.length < 2;
   if(light.castShadow){
@@ -634,7 +642,7 @@ function addTorch(x, z, torchList, color){
   const flame = new THREE.Mesh(new THREE.SphereGeometry(0.08,6,6), flameMat);
   flame.position.set(x, 1.62, z);
   scene.add(flame);
-  const entry = { light, flame, bracket, baseIntensity: 1.6, flicker: Math.random()*10 };
+  const entry = { light, flame, bracket, baseIntensity: 1.9, flicker: Math.random()*10 };
   torchList.push(entry);
   return entry;
 }
@@ -676,6 +684,29 @@ function addGlowglassWindow(x, z, fillList){
   fillList.push(entry);
   return entry;
 }
+/* ---- drifting ember motes near torches (dungeon/castle) - purely decorative,
+   no light of their own, they just sell "the flame is really there" like the
+   dust-mote idea in the reference mockup, adapted for a free-roaming 3D scene
+   rather than a fixed painted view. ---- */
+function spawnEmberMotesNear(torchEntry, fillList){
+  const motes = [];
+  for(let i=0;i<3;i++){
+    const mat = new THREE.MeshStandardMaterial({ color:0xffb347, emissive:0xff8a3c, emissiveIntensity:1.2, transparent:true, opacity:0.8 });
+    const mote = new THREE.Mesh(new THREE.SphereGeometry(0.012,4,4), mat);
+    const ang = (i/3)*Math.PI*2;
+    mote.position.set(
+      torchEntry.light.position.x + Math.cos(ang)*0.08,
+      1.6 + i*0.06,
+      torchEntry.light.position.z + Math.sin(ang)*0.08
+    );
+    scene.add(mote);
+    const entry = { mesh:mote, kind:'ember', torch:torchEntry, angle:ang, phase:Math.random()*10 };
+    fillList.push(entry);
+    motes.push(entry);
+  }
+  return motes;
+}
+
 function addGroveGlow(x, z, fillList, kind){
   // Sunlit Grove: glowing mushroom clusters + firefly motes.
   if(kind==='mushroom'){
@@ -717,10 +748,17 @@ function makeBrickTexture(baseHex){
   for(let row=0; row<128/bh; row++){
     const offset=(row%2===0)?0:bw/2;
     for(let x=-bw; x<128+bw; x+=bw){
-      const shade = 6-Math.floor(Math.random()*12);
+      const shade = 9-Math.floor(Math.random()*18);
       g.fillStyle='rgb('+(base.r+shade)+','+(base.g+shade)+','+(base.b+shade)+')';
       g.fillRect(x+offset+1,row*bh+1,bw-2,bh-2);
     }
+  }
+  // fine-grain surface noise on top of the per-block variance, for a less flat stone look
+  for(let i=0;i<420;i++){
+    const nx=Math.random()*128, ny=Math.random()*128;
+    const n=Math.floor((Math.random()-0.5)*10);
+    g.fillStyle='rgba('+(base.r+n)+','+(base.g+n)+','+(base.b+n)+',0.35)';
+    g.fillRect(nx,ny,1.4,1.4);
   }
   g.strokeStyle='rgba(20,14,8,.5)'; g.lineWidth=2;
   for(let row=0; row<=128/bh; row++){ g.beginPath(); g.moveTo(0,row*bh); g.lineTo(128,row*bh); g.stroke(); }
@@ -812,7 +850,7 @@ function clearCurrentLevel(){
   if(o.ceilingMesh) scene.remove(o.ceilingMesh);
   o.beams.forEach(b=>scene.remove(b));
   o.torches.forEach(t=>{ scene.remove(t.light); scene.remove(t.flame); scene.remove(t.bracket); });
-  o.fills.forEach(f=>{ scene.remove(f.light); scene.remove(f.mesh); if(f.pane) scene.remove(f.pane); });
+  o.fills.forEach(f=>{ if(f.light) scene.remove(f.light); scene.remove(f.mesh); if(f.pane) scene.remove(f.pane); });
   o.props.forEach(p=>scene.remove(p));
 }
 function buildLevelGeometry(levelDef){
@@ -878,12 +916,15 @@ function buildLevelGeometry(levelDef){
   }
 
   const torches = [];
+  const fills = [];
   if(theme.useTorches){
-    claimCells(i=>i%9===0, 6).forEach(c=>addTorch(c.x,c.z,torches,theme.torchColor));
+    claimCells(i=>i%9===0, 6).forEach(c=>{
+      const torchEntry = addTorch(c.x,c.z,torches,theme.torchColor);
+      spawnEmberMotesNear(torchEntry, fills);
+    });
   }
 
   // fill lights per the scenery spec (crystal veins / glowglass windows / grove glow)
-  const fills = [];
   if(theme.fillKind==='crystal'){
     claimCells(i=>i%12===6, 4).forEach(c=>addCrystalVein(c.x,c.z,fills));
   } else if(theme.fillKind==='glowglass'){
@@ -1613,6 +1654,15 @@ function update(dtMs){
       f.flicker += dt*3;
       f.light.intensity = (f.kind==='mushroom'?0.7:0.5) + Math.sin(f.flicker)*0.25;
       if(f.kind==='firefly') f.mesh.position.y = f.baseY + Math.sin(f.flicker*1.7)*0.08;
+    } else if(f.kind==='ember'){
+      f.phase += dt*2;
+      const rise = (f.phase % 2)/2; // 0..1 repeating rise-and-fade cycle
+      f.mesh.position.set(
+        f.torch.light.position.x + Math.cos(f.angle+f.phase)*0.08,
+        1.6 + rise*0.5,
+        f.torch.light.position.z + Math.sin(f.angle+f.phase)*0.08
+      );
+      f.mesh.material.opacity = 0.8*(1-rise);
     }
   });
 
@@ -1773,7 +1823,7 @@ window.__GAME3D_DEBUG__ = {
   computeMaxHp, computeDamage, computeSpeed, computeCooldown,
   computeLifesteal, xpForLevel, applyXp, spendSkillPoint, rescaleHpForNewMax, rollLootRarity, pickItemOfRarity,
   stepProjectile, projectileHits, volleyAngles, specialBurstDamage, rollLootKind, weaponTierForRarity,
-  pointsFarEnough, doorwaysWideEnough,
+  pointsFarEnough, doorwaysWideEnough, pointLightAttenuation,
   getPlayer:()=>player, getWolf:()=>wolf, getAllies:()=>allies, getProjectiles:()=>projectiles,
   getLevelIndex:()=>levelIndex, getKillsThisLevel:()=>killsThisLevel, getLoopCount:()=>loopCount,
   getKills:()=>kills, getLootDrops:()=>lootDrops, getCurrentLevel:()=>currentLevel,
