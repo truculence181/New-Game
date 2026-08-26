@@ -61,14 +61,18 @@ After the Castle Courtyard, the loop continues back to the Dungeon with tougher 
 ## Features
 
 - Real WebGL 3D scene: procedurally-textured brick walls and stone floor (canvas-generated, no external image files), fog for depth, ceiling beams
-- 3 distinct levels with different themes (dark dungeon, bright open grove, semi-open castle courtyard) and progression gated by kill count, with looping difficulty scaling
-- Dynamic point-light torches with wall brackets and flickering flame props that cast real shadows (dungeon/castle levels)
+- 3 distinct levels with different lighting/mood palettes and progression gated by kill count, with looping difficulty scaling:
+  - **Dungeon Depths** — dark, torch-lit corridors with cool blue crystal-vein fill lights for wayfinding
+  - **Sunlit Grove** — bright open outdoor level with glowing mushroom clusters and firefly motes
+  - **Castle Courtyard** — golden-hour ruins with braziers and green ivy-covered glowglass windows
+- Every light source is paired with a visible emitter mesh (no "phantom" lights), ambient is never fully dark in any level, and prop placement runs through a real collision-overlap pass so no two light-bearing props ever land on top of each other
 - Environment props for visual variety: barrels, crates, rubble piles, and columns scattered through each level
 - A low-poly 3D wolf enemy with a walk cycle that turns to face you and chases based on line-of-sight-aware AI
-- Per-class first-person viewmodels with real detail (wrapped grips, gems, coiled wire, fletched arrows, a skull-topped necromancer staff) and ranged bolt projectiles for casters
+- Per-class first-person viewmodels with real detail (wrapped grips, gems, coiled wire, fletched arrows, a skull-topped necromancer staff) and ranged bolt projectiles for casters, visually upgrading (larger, glowing aura) as you find better gear
 - A shared ally-companion system powering the Necromancer's and Beastmaster's summon specials
+- A full class-specific 3-tier weapon progression (Starter → Discovered → Legendary) with unique unlockable combat effects per class
 - Minimap overlay showing the maze layout and live positions
-- Fully separated architecture: all gameplay rules (movement, collision, line-of-sight, enemy AI, XP/skills/loot/specials math) are pure functions independent of Three.js — the rendering layer only ever *reads* game state, it never owns game logic
+- Fully separated architecture: all gameplay rules (movement, collision, line-of-sight, enemy AI, XP/skills/loot/specials/scenery-placement math) are pure functions independent of Three.js — the rendering layer only ever *reads* game state, it never owns game logic
 
 ## Project structure
 
