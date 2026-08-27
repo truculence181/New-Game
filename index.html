@@ -143,6 +143,34 @@
   }
   #tAttack{ background:rgba(255,92,108,.32); border:2px solid rgba(255,92,108,.75); }
   #tSpecial{ background:rgba(79,216,196,.3); border:2px solid rgba(79,216,196,.75); }
+  #tTalk{ background:rgba(255,207,92,.3); border:2px solid rgba(255,207,92,.8); }
+  #tTalk.hidden{ display:none; }
+
+  #interactPrompt{
+    position:absolute; left:50%; bottom:20%; transform:translateX(-50%);
+    z-index:6; background:rgba(10,6,20,.65); border:1px solid rgba(255,207,92,.55);
+    color:#ffcf5c; font-family:'Cinzel',serif; font-size:.72rem; padding:5px 14px;
+    border-radius:20px; pointer-events:none; white-space:nowrap; text-shadow:0 1px 3px #000;
+  }
+  #interactPrompt.hidden{ display:none; }
+
+  #screen-dialogue{
+    position:absolute; left:50%; bottom:calc(14px + env(safe-area-inset-bottom,0px));
+    transform:translateX(-50%); z-index:12; width:min(92vw,520px);
+    background:rgba(12,7,20,.94); border:2px solid rgba(255,207,92,.55); border-radius:14px;
+    padding:12px 14px; display:flex; gap:10px; align-items:flex-start;
+    box-shadow:0 8px 24px rgba(0,0,0,.5);
+  }
+  #screen-dialogue.hidden{ display:none; }
+  #dlgIcon{ font-size:1.9rem; line-height:1; flex-shrink:0; margin-top:2px; }
+  #dlgBody{ flex:1; min-width:0; }
+  #dlgName{ font-family:'Cinzel',serif; color:#ffcf5c; font-size:.78rem; margin-bottom:5px; text-shadow:0 1px 3px #000; }
+  #dlgText{ color:#f2ecff; font-size:.82rem; line-height:1.5; margin-bottom:9px; }
+  #dlgNext{
+    display:block; margin-left:auto; font-family:'Nunito',sans-serif; font-weight:800; font-size:.72rem;
+    border:none; border-radius:8px; padding:7px 14px; cursor:pointer;
+    background:linear-gradient(180deg,#ffcf5c,#d99a2b); color:#2a1a05;
+  }
   #rotateDeviceNote{
     display:none; position:absolute; inset:0; z-index:25; background:#0c0716;
     align-items:center; justify-content:center; text-align:center; padding:20px;
@@ -172,9 +200,19 @@
   </div>
 
   <div id="msg"></div>
-  <div id="controls-note" class="desktop-only">WASD move · mouse look (click to lock) · click/Space attack · E/right-click special · Esc releases mouse · ⭐ skill tree</div>
+  <div id="interactPrompt" class="hidden">Press F to talk</div>
+  <div id="controls-note" class="desktop-only">WASD move · mouse look (click to lock) · click/Space attack · E/right-click special · F talk · Esc releases mouse · ⭐ skill tree</div>
   <div id="lockPrompt" class="hidden">Click anywhere to look around</div>
   <div id="rotateDeviceNote">Rotate your device to landscape 🐉<br>for the full 3D view</div>
+
+  <div id="screen-dialogue" class="hidden">
+    <div id="dlgIcon">🧙</div>
+    <div id="dlgBody">
+      <div id="dlgName">Name</div>
+      <div id="dlgText">...</div>
+      <button id="dlgNext">Continue ▶</button>
+    </div>
+  </div>
 
   <div id="screen-select" class="screen">
     <h1>🐉 Dragon's Hollow — 3D</h1>
@@ -194,6 +232,7 @@
 
   <div class="joy-base touch-only" id="joyBase"><div class="joy-knob" id="joyKnob"></div></div>
   <div id="rightControls" class="touch-only">
+    <div id="tTalk" class="hidden">🗨</div>
     <div id="tSpecial">✨</div>
     <div id="tAttack">⚔</div>
   </div>
@@ -285,6 +324,102 @@ const THEME_DEFS = {
              hemiSky:0x9ab0c0, hemiGround:0x5a5040, hemiIntensity:0.75, fogColor:0x7a6350, fogNear:5, fogFar:18,
              useTorches:true, torchColor:0xff7a2e, hasCeiling:true, useColumns:true, fillKind:'glowglass' },
 };
+
+/* ---- NPCs: mockup story content for the exploration loop ----
+   Each level gets one lore character. Their lines depend on `loopCount`
+   (how many full dungeon->grove->courtyard circuits the player has made)
+   and whether this is the first-ever meeting, so the same three characters
+   can carry a light throughline across an endless run without any new
+   save/quest-flag system - it all reads off state the game already tracks. */
+const NPC_DEFS = {
+  dungeon: {
+    id:'bram', name:'Bram, the Trapped Scout', icon:'🧙', accentColor:0x8ecbff,
+    lines(ctx){
+      if(ctx.loopCount===0 && !ctx.metBefore) return [
+        "...another soul, still breathing? Careful - these tunnels have teeth now.",
+        "I came searching for why the wolves turned feral. Found only more dark.",
+        "They weren't always monsters. Something changed them - something that lives further in.",
+        "Follow the passages up ahead. The grove beyond might show you what I couldn't find."
+      ];
+      if(ctx.loopCount===0) return ["Still hunting? Watch your back down here."];
+      return [
+        "Back again? The howls get louder every time you pass through.",
+        "It's like these halls forget everything... except you."
+      ];
+    }
+  },
+  grove: {
+    id:'wisp', name:'Wisp', icon:'✨', accentColor:0xb6ffcf,
+    lines(ctx){
+      if(ctx.loopCount===0 && !ctx.metBefore) return [
+        "Oh! A visitor. It's been so long since anyone walked here without snarling.",
+        "This grove used to sing. Then a shadow crept in from the old castle, and the wolves stopped listening.",
+        "Even the dragon went quiet. It used to answer when we called. Now... nothing.",
+        "Grow strong, little one. Your skill tree glows brighter with every fight - use it well."
+      ];
+      if(ctx.loopCount===0) return ["The grove feels a little lighter today. Thank you."];
+      return [
+        "You came back around! I can feel the shadow thinning where you fight.",
+        "Keep going. Maybe one day it reaches all the way to the castle."
+      ];
+    }
+  },
+  courtyard: {
+    id:'aldric', name:'Sir Aldric', icon:'👻', accentColor:0xffe28a,
+    lines(ctx){
+      if(ctx.loopCount===0 && !ctx.metBefore) return [
+        "Halt - oh. You're not one of the corrupted. Forgive me, I've forgotten what living guests look like.",
+        "I served the dragon of this Hollow, before it fell into a sleep no dragon should sleep.",
+        "The wolves you fight are echoes of its power, leaking out like smoke from a dying fire.",
+        "Break the cycle enough times, hero, and perhaps you'll be the one to finally wake it - or free it."
+      ];
+      if(ctx.loopCount===0) return ["The courtyard remembers you now. That's something, in a place like this."];
+      return [
+        "Another circuit complete. I felt it - the grip loosens, just a little.",
+        "Perhaps the day will come when you stand before the dragon itself."
+      ];
+    }
+  }
+};
+const NPC_INTERACT_RANGE = 1.4;
+
+/* ---- Side quests: bonus-XP objectives offered by each NPC.
+   Each quest reads off a stat the game already tracks cumulatively
+   (never resets mid-run), so progress survives level transitions and loops:
+     - bram's quest tracks the global `kills` counter
+     - wisp's quest tracks `totalLootFound`
+     - aldric's quest tracks `player.level`
+   Quests auto-accept on first chat and auto-turn-in the next time you talk
+   to that NPC once the target is met - no menu needed, just come back and say hi. */
+const QUEST_DEFS = {
+  bram: {
+    metric:()=>kills, baseAmount:3, baseXp:20, amountStep:1, xpStep:8,
+    taskText:(amt)=>`Defeat ${amt} more wolves out there and come tell me.`,
+    progressText:(have,amt)=>`Wolves defeated: ${Math.min(have,amt)}/${amt}.`
+  },
+  wisp: {
+    metric:()=>totalLootFound, baseAmount:1, baseXp:25, amountStep:1, xpStep:10,
+    taskText:(amt)=>`Bring back proof you found ${amt} more treasure${amt>1?'s':''} out there.`,
+    progressText:(have,amt)=>`Treasures found: ${Math.min(have,amt)}/${amt}.`
+  },
+  aldric: {
+    metric:()=>player.level, baseAmount:1, baseXp:30, amountStep:0, xpStep:12,
+    taskText:(amt)=>`Grow ${amt} level${amt>1?'s':''} stronger and return to me.`,
+    progressText:(have,amt)=>`Levels gained: ${Math.min(have,amt)}/${amt}.`
+  }
+};
+const questState = {}; // { [npcId]: { completedCount, amount, xpReward, startValue } | undefined }
+function startQuest(npcId, completedCount){
+  const def = QUEST_DEFS[npcId];
+  const q = {
+    completedCount,
+    amount: def.baseAmount + def.amountStep*completedCount,
+    xpReward: def.baseXp + def.xpStep*completedCount,
+    startValue: def.metric()
+  };
+  questState[npcId] = q;
+  return q;
+}
 
 /* ---- anti-clipping rules from the scenery spec, applied as real geometric checks ---- */
 const CLIP_RULES = { minColliderGap:0.5, minWallInset:0.08, minDoorwayWidth:1.2, playerRadius:0.25 };
@@ -524,6 +659,7 @@ let player = null;
 const wolf = { hp: 30, maxHp: 30, alive: true, speed: 1.3, hitFlash: 0, attackCd: 0, x:0, z:0,
   slowMs:0, dotMs:0, dotTickMs:0, dotDmg:0 };
 let kills = 0;
+let totalLootFound = 0;
 let levelIndex = 0;
 let killsThisLevel = 0;
 let loopCount = 0;
@@ -852,6 +988,7 @@ function clearCurrentLevel(){
   o.torches.forEach(t=>{ scene.remove(t.light); scene.remove(t.flame); scene.remove(t.bracket); });
   o.fills.forEach(f=>{ if(f.light) scene.remove(f.light); scene.remove(f.mesh); if(f.pane) scene.remove(f.pane); });
   o.props.forEach(p=>scene.remove(p));
+  if(o.npc){ scene.remove(o.npc.sprite); scene.remove(o.npc.indicator); scene.remove(o.npc.light); }
 }
 function buildLevelGeometry(levelDef){
   clearCurrentLevel();
@@ -945,7 +1082,14 @@ function buildLevelGeometry(levelDef){
     claimCells(i=>i%17===7, 3).forEach(c=>props.push(...addColumn(c.x,c.z)));
   }
 
-  currentLevel = { wallGroup, floorMesh, ceilingMesh, beams, torches, fills, props };
+  let npc = null;
+  const npcDef = NPC_DEFS[levelDef.id];
+  if(npcDef){
+    const spot = claimCells(i=>i%19===3, 1)[0] || allCells.find((c,i)=>!claimed.has(i));
+    if(spot) npc = addNpc(spot.x, spot.z, npcDef);
+  }
+
+  currentLevel = { wallGroup, floorMesh, ceilingMesh, beams, torches, fills, props, npc };
 }
 buildLevelGeometry(LEVEL_DEFS[0]);
 
@@ -1168,12 +1312,14 @@ function equipItem(itemId){
   const newMax = computeMaxHp(player.baseHp, player.skills, player.equipment.armor);
   player.hp = rescaleHpForNewMax(player.hp, oldMax, newMax);
   player.maxHp = newMax;
+  totalLootFound++;
   showMsg('Found '+item.name+'!');
   updateHud();
 }
 function equipWeaponTier(tier){
   player.weaponTier = tier;
   const w = WEAPON_TIERS[player.cls][tier];
+  totalLootFound++;
   showMsg('Found the '+w.name+'!'+(w.flavor?(' '+w.flavor):''));
   if(viewmodelGroup.parent) camera.remove(viewmodelGroup);
   viewmodelGroup = buildViewmodel(player.cls, tier);
@@ -1181,13 +1327,124 @@ function equipWeaponTier(tier){
   updateHud();
 }
 
+/* ---- NPC visuals (badge sprite + floating chat indicator + soft glow) ---- */
+function makeNpcSprite(npc){
+  const c=document.createElement('canvas'); c.width=128; c.height=128;
+  const g=c.getContext('2d');
+  g.beginPath(); g.arc(64,64,54,0,Math.PI*2);
+  g.fillStyle='rgba(20,14,30,0.78)'; g.fill();
+  g.lineWidth=6; g.strokeStyle='#'+npc.accentColor.toString(16).padStart(6,'0'); g.stroke();
+  g.font='62px serif'; g.textAlign='center'; g.textBaseline='middle';
+  g.fillText(npc.icon, 64, 70);
+  const tex=new THREE.CanvasTexture(c);
+  const mat=new THREE.SpriteMaterial({ map:tex, transparent:true, depthWrite:false });
+  const spr=new THREE.Sprite(mat);
+  spr.scale.set(0.85,0.85,0.85);
+  return spr;
+}
+function makeChatIndicator(){
+  const c=document.createElement('canvas'); c.width=48; c.height=48;
+  const g=c.getContext('2d');
+  g.font='32px serif'; g.textAlign='center'; g.textBaseline='middle';
+  g.fillText('💬', 24, 26);
+  const tex=new THREE.CanvasTexture(c);
+  const mat=new THREE.SpriteMaterial({ map:tex, transparent:true, depthWrite:false });
+  const spr=new THREE.Sprite(mat);
+  spr.scale.set(0.3,0.3,0.3);
+  return spr;
+}
+function addNpc(x,z,npcDef){
+  const sprite = makeNpcSprite(npcDef);
+  sprite.position.set(x, 0.95, z);
+  scene.add(sprite);
+  const indicator = makeChatIndicator();
+  indicator.position.set(x, 1.55, z);
+  scene.add(indicator);
+  const light = new THREE.PointLight(npcDef.accentColor, 0.7, 3, 2);
+  light.position.set(x, 1.0, z);
+  scene.add(light);
+  return { def:npcDef, x, z, sprite, indicator, light, bob:Math.random()*10 };
+}
+
+/* ---- Dialogue: simple line-by-line box, pauses the same way the skill tree does ---- */
+let dialogueOpen = false;
+let dialogueNpc = null;
+let dialogueLines = [];
+let dialogueIndex = 0;
+const metNpcIds = new Set();
+
+function tryInteract(){
+  if(gameState!=='playing' || paused) return;
+  const npc = currentLevel.npc;
+  if(!npc) return;
+  const d = Math.hypot(player.x-npc.x, player.z-npc.z);
+  if(d <= NPC_INTERACT_RANGE) openDialogue(npc);
+}
+function renderDialogueLine(){
+  document.getElementById('dlgText').textContent = dialogueLines[dialogueIndex];
+  document.getElementById('dlgNext').textContent = (dialogueIndex >= dialogueLines.length-1) ? 'Close' : 'Continue ▶';
+}
+function openDialogue(npc){
+  dialogueOpen = true;
+  paused = true;
+  dialogueNpc = npc;
+  const npcId = npc.def.id;
+  const lines = npc.def.lines({ loopCount, metBefore: metNpcIds.has(npcId) });
+
+  const qdef = QUEST_DEFS[npcId];
+  let q = questState[npcId];
+  if(q){
+    const progress = qdef.metric() - q.startValue;
+    if(progress >= q.amount){
+      awardXp(q.xpReward);
+      lines.push(`📜 Quest complete! +${q.xpReward} XP.`);
+      q = startQuest(npcId, q.completedCount+1);
+      lines.push('📜 New quest: '+qdef.taskText(q.amount));
+    } else {
+      lines.push('📜 Quest: '+qdef.progressText(progress, q.amount));
+    }
+  } else {
+    q = startQuest(npcId, 0);
+    lines.push('📜 New quest: '+qdef.taskText(q.amount));
+  }
+
+  dialogueLines = lines;
+  dialogueIndex = 0;
+  document.getElementById('dlgIcon').textContent = npc.def.icon;
+  document.getElementById('dlgName').textContent = npc.def.name;
+  renderDialogueLine();
+  document.getElementById('screen-dialogue').classList.remove('hidden');
+  document.getElementById('interactPrompt').classList.add('hidden');
+  document.getElementById('tTalk').classList.add('hidden');
+}
+function advanceDialogue(){
+  if(!dialogueOpen) return;
+  dialogueIndex++;
+  if(dialogueIndex >= dialogueLines.length){ closeDialogue(); return; }
+  renderDialogueLine();
+}
+function closeDialogue(){
+  if(dialogueNpc) metNpcIds.add(dialogueNpc.def.id);
+  dialogueOpen = false;
+  paused = false;
+  dialogueNpc = null;
+  document.getElementById('screen-dialogue').classList.add('hidden');
+}
+document.getElementById('dlgNext').onclick = advanceDialogue;
+
 /* ================= INPUT ================= */
 const isTouchDevice = matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window;
 const keys = new Set();
 window.addEventListener('keydown', e=>{
-  keys.add(e.key.toLowerCase());
+  const k = e.key.toLowerCase();
+  keys.add(k);
+  if(dialogueOpen){
+    if(k==='f' || k==='enter' || k===' '){ e.preventDefault(); advanceDialogue(); }
+    return;
+  }
   if(e.key===' ') tryAttack();
-  if(e.key.toLowerCase()==='e') trySpecial();
+  if(k==='e') trySpecial();
+  if(k==='f') tryInteract();
 });
 window.addEventListener('keyup', e=>keys.delete(e.key.toLowerCase()));
 
@@ -1263,6 +1520,7 @@ function bindHold(id, onDown, onUp){
 })();
 bindHold('tAttack', ()=>tryAttack(), ()=>{});
 bindHold('tSpecial', ()=>trySpecial(), ()=>{});
+bindHold('tTalk', ()=>tryInteract(), ()=>{});
 
 /* ================= ATTACK ================= */
 let daggerSwing = 0;
@@ -1298,7 +1556,7 @@ function damageWolf(amount, fromAlly){
   updateHud();
 }
 function tryAttack(){
-  if(gameState!=='playing' || player.attackCd > 0) return;
+  if(gameState!=='playing' || paused || player.attackCd > 0) return;
   const def = CLASS_DEFS[player.cls];
   const weapon = WEAPON_TIERS[player.cls][player.weaponTier];
   player.attackCd = computeCooldown(def.cooldown, player.skills, player.equipment.trinket);
@@ -1429,7 +1687,7 @@ function updateAllies(dt, dtMs){
 }
 
 function trySpecial(){
-  if(gameState!=='playing' || player.specialCd > 0) return;
+  if(gameState!=='playing' || paused || player.specialCd > 0) return;
   const def = CLASS_DEFS[player.cls];
   const spec = SPECIAL_DEFS[player.cls];
   const weapon = WEAPON_TIERS[player.cls][player.weaponTier];
@@ -1607,6 +1865,19 @@ function update(dtMs){
       if(wolf.dotTickMs<=0){ wolf.dotTickMs=500; if(wolf.alive) damageWolf(wolf.dotDmg); }
     }
   }
+
+  // NPC: gentle idle animation + interact-prompt proximity check
+  const npc = currentLevel.npc;
+  let nearNpc = false;
+  if(npc){
+    npc.bob += dt*2;
+    npc.sprite.position.y = 0.95 + Math.sin(npc.bob)*0.05;
+    npc.indicator.position.y = 1.55 + Math.sin(npc.bob*1.4)*0.08;
+    npc.indicator.material.opacity = 0.55 + Math.sin(npc.bob*1.4)*0.35;
+    nearNpc = Math.hypot(player.x-npc.x, player.z-npc.z) <= NPC_INTERACT_RANGE;
+  }
+  document.getElementById('interactPrompt').classList.toggle('hidden', !nearNpc);
+  if(isTouchDevice) document.getElementById('tTalk').classList.toggle('hidden', !nearNpc);
 
   // loot pickup
   lootDrops = lootDrops.filter(drop=>{
@@ -1789,7 +2060,7 @@ function buildSkillScreen(){
   });
 }
 function openSkills(){
-  if(gameState!=='playing') return;
+  if(gameState!=='playing' || paused) return;
   paused = true;
   buildSkillScreen();
   document.getElementById('screen-skills').classList.remove('hidden');
