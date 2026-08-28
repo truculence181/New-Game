@@ -252,6 +252,7 @@ if(typeof THREE === 'undefined'){
 const LEVEL_DEFS = [
   {
     id:'dungeon', name:'Dungeon Depths', theme:'dungeon', killsToAdvance:5,
+    enemyKinds:['skeleton','bat'],
     introText:'You descend into the ancient dungeon. Something is stirring in the dark...',
     mapRows:[
       "1111111111111",
@@ -271,6 +272,7 @@ const LEVEL_DEFS = [
   },
   {
     id:'grove', name:'Sunlit Grove', theme:'open', killsToAdvance:5,
+    enemyKinds:['wolf'],
     introText:'A hidden passage opens into a bright, overgrown grove. The wolves here roam free under open sky.',
     mapRows:[
       "1111111111111",
@@ -290,6 +292,7 @@ const LEVEL_DEFS = [
   },
   {
     id:'courtyard', name:'Castle Courtyard', theme:'castle', killsToAdvance:6,
+    enemyKinds:['wolf'],
     introText:'You emerge into the ruined courtyard of an old castle, its columned halls open to the sky.',
     mapRows:[
       "1111111111111",
@@ -520,6 +523,27 @@ const CLASS_DEFS = {
   necromancer: { name:'Necromancer', icon:'💀', hp:95,  speed:2.4, dmg:9,  atkType:'ranged', range:8,    cooldown:480, projSpeed:8,  color:0x8a5bd6, desc:'Channels dark bolts of necrotic energy.' },
   beastmaster: { name:'Beastmaster', icon:'🐺', hp:125, speed:2.7, dmg:8,  atkType:'melee',  range:3.4,  cooldown:380, color:0xffc93c, desc:'Whip-crack melee with impressive reach.' },
 };
+
+/* ---- Enemy stat registry: pure numbers only (kind-agnostic combat math).
+   Mesh builders + per-kind animation live further down near the other THREE
+   builders (buildWolfMesh etc.) and are merged onto these entries by id once
+   THREE is available, so this block stays independently testable. ---- */
+const ENEMY_DEFS = {
+  wolf:     { name:'Hollow Wolf',    baseHp:30, hpPerLevel:6, hpPerLoop:20, speed:1.3,  dmg:6, atkRange:1.1,  atkCdMs:900,  hitRadius:0.5,  xp:12, flying:false,
+              biteMsg:'The hollow wolf lunges at you!',   fallMsg:'The hollow wolf collapses into ash!', color:0xff5533 },
+  skeleton: { name:'Bound Sentinel', baseHp:38, hpPerLevel:7, hpPerLoop:22, speed:1.05, dmg:7, atkRange:1.15, atkCdMs:1000, hitRadius:0.5,  xp:14, flying:false,
+              biteMsg:'The bound sentinel swings its blade!', fallMsg:'The bound sentinel crumbles to bone!', color:0xd8cfa8 },
+  bat:      { name:'Cave Shrieker',  baseHp:15, hpPerLevel:3, hpPerLoop:8,  speed:2.3,  dmg:4, atkRange:0.9,  atkCdMs:650,  hitRadius:0.35, xp:9,  flying:true,
+              biteMsg:'The shrieker claws at you!',       fallMsg:'The shrieker shrieks and drops!', color:0xc060ff },
+};
+function scaleEnemyMaxHp(kind, level, loop){
+  const def = ENEMY_DEFS[kind];
+  return def.baseHp + (level-1)*def.hpPerLevel + loop*def.hpPerLoop;
+}
+function pickEnemyKind(levelDef){
+  const pool = (levelDef && levelDef.enemyKinds) ? levelDef.enemyKinds : ['wolf'];
+  return pool[Math.floor(Math.random()*pool.length)];
+}
 // Three-tier weapon progression per class (Starter -> Discovered -> Legendary),
 // adapted from the design spec. Each tier's baseDamage REPLACES the class's
 // base damage while equipped; `unlock` keys gate the proc effects below.
@@ -673,7 +697,7 @@ let gameState = 'select'; // 'select' | 'playing'
 let paused = false;
 let selectedClass = 'warrior';
 let player = null;
-const wolf = { hp: 30, maxHp: 30, alive: true, speed: 1.3, hitFlash: 0, attackCd: 0, x:0, z:0,
+const enemy = { kind:'wolf', hp: 30, maxHp: 30, alive: true, speed: 1.3, hitFlash: 0, attackCd: 0, x:0, z:0,
   slowMs:0, dotMs:0, dotTickMs:0, dotDmg:0 };
 let kills = 0;
 let totalLootFound = 0;
@@ -698,11 +722,16 @@ function newPlayer(cls){
     buffMs:0, buffDmgMult:1, buffSpeedMult:1
   };
 }
-function respawnWolf(nearExclude){
+function respawnEnemy(nearExclude){
   const spot = randomOpenCell(nearExclude);
-  wolf.x = spot.x; wolf.z = spot.z;
-  wolf.maxHp = 30 + (player.level-1)*6 + loopCount*20;
-  wolf.hp = wolf.maxHp; wolf.alive = true;
+  const levelDef = LEVEL_DEFS[levelIndex];
+  const kind = pickEnemyKind(levelDef);
+  enemy.kind = kind;
+  enemy.x = spot.x; enemy.z = spot.z;
+  enemy.maxHp = scaleEnemyMaxHp(kind, player.level, loopCount);
+  enemy.hp = enemy.maxHp; enemy.alive = true;
+  enemy.slowMs = 0; enemy.dotMs = 0; enemy.dotTickMs = 0; enemy.dotDmg = 0; enemy.hitFlash = 0; enemy.attackCd = 0;
+  rebuildEnemyMesh();
 }
 function advanceLevel(){
   levelIndex++;
@@ -712,8 +741,8 @@ function advanceLevel(){
   buildLevelGeometry(def);
   const spot = randomOpenCell();
   player.x = spot.x; player.z = spot.z;
-  respawnWolf(player);
-  wolfMesh.visible = true;
+  respawnEnemy(player);
+  enemyMesh.visible = true;
   showMsg(def.introText);
   updateHud();
 }
@@ -1114,42 +1143,221 @@ function buildLevelGeometry(levelDef){
 }
 buildLevelGeometry(LEVEL_DEFS[0]);
 
-/* ---- wolf enemy (low-poly 3D, not a billboard) ---- */
-function buildWolf(){
+/* ---- enemy meshes (low-poly-but-rounded 3D, not billboards) ----
+   Each builder returns a THREE.Group with userData.materials (used for the
+   shared hit-flash flicker) plus whatever kind-specific parts its animate()
+   callback needs (legs, arms, wings...). All are built "facing +x" so the
+   single rotation.y = faceAngle assignment in the main loop orients any kind
+   correctly without kind-specific rotation math. */
+function buildWolfMesh(){
   const g = new THREE.Group();
-  const furMat = new THREE.MeshStandardMaterial({ color: 0x8a6a42, roughness: 0.85 });
-  const darkMat = new THREE.MeshStandardMaterial({ color: 0x4a3826, roughness: 0.85 });
-  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xff5c6c, emissive: 0xff2c3c, emissiveIntensity: 0.8 });
+  const furMat = new THREE.MeshStandardMaterial({ color: 0x3a3532, roughness: 0.88 });
+  const bellyMat = new THREE.MeshStandardMaterial({ color: 0x585048, roughness: 0.88 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x1c1a18, roughness: 0.85 });
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xff5533, emissive: 0xaa2211, emissiveIntensity: 1.1 });
 
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.42, 0.4), furMat);
-  body.position.set(0, 0.32, 0); body.castShadow=true; g.add(body);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.3, 0.32), furMat);
-  head.position.set(0.52, 0.4, 0); head.castShadow=true; g.add(head);
-  const snout = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.14, 0.18), darkMat);
-  snout.position.set(0.74, 0.34, 0); snout.castShadow=true; g.add(snout);
-  [[-0.08,0.12],[0.08,0.12]].forEach(([dz])=>{
-    const ear = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.16, 4), darkMat);
-    ear.position.set(0.5, 0.6, dz); ear.rotation.x = Math.PI; g.add(ear);
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 12), furMat);
+  body.scale.set(1.55, 0.92, 0.86); body.position.set(0, 0.34, 0); body.castShadow=true; g.add(body);
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.22, 14, 10), bellyMat);
+  belly.scale.set(1.3, 0.68, 0.72); belly.position.set(-0.02, 0.2, 0); g.add(belly);
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.24, 12), furMat);
+  neck.rotation.z = Math.PI/2.3; neck.position.set(0.42, 0.42, 0); g.add(neck);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.19, 14, 12), furMat);
+  head.scale.set(1.05, 0.95, 0.92); head.position.set(0.56, 0.44, 0); head.castShadow=true; g.add(head);
+  const snout = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.12, 0.26, 10), furMat);
+  snout.rotation.z = Math.PI/2; snout.position.set(0.78, 0.38, 0); g.add(snout);
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 8), darkMat);
+  nose.position.set(0.9, 0.38, 0); g.add(nose);
+  const fangMat = new THREE.MeshStandardMaterial({ color: 0xe8dcc4, roughness: 0.4 });
+  [-0.06, 0.06].forEach(dz=>{
+    const fang = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.06, 6), fangMat);
+    fang.position.set(0.82, 0.3, dz); fang.rotation.x = Math.PI; g.add(fang);
+  });
+  [-0.09, 0.09].forEach(dz=>{
+    const ear = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.19, 8), darkMat);
+    ear.position.set(0.52, 0.62, dz); ear.rotation.x = Math.PI; g.add(ear);
   });
   const legs = [];
-  [[-0.28,0.62],[0.28,0.62],[-0.28,-0.62],[0.28,-0.62]].forEach(([dx,dzMul])=>{
-    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1,0.32,0.1), darkMat);
-    leg.position.set(dx, 0.16, dzMul*0.16);
-    leg.castShadow=true; g.add(leg);
-    legs.push(leg);
+  [[-0.24,0.6],[0.24,0.6],[-0.24,-0.6],[0.24,-0.6]].forEach(([dx,dzMul])=>{
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.07, 0.34, 10), darkMat);
+    leg.position.set(dx, 0.17, dzMul*0.15); leg.castShadow=true; g.add(leg); legs.push(leg);
+    const paw = new THREE.Mesh(new THREE.SphereGeometry(0.075, 8, 8), darkMat);
+    paw.position.set(dx, 0.02, dzMul*0.15); g.add(paw);
   });
-  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.35,0.09,0.09), furMat);
-  tail.position.set(-0.55,0.4,0); tail.rotation.z = 0.4; g.add(tail);
-  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.025,6,6), eyeMat);
-  eyeL.position.set(0.62,0.44,0.09); g.add(eyeL);
-  const eyeR = eyeL.clone(); eyeR.position.z=-0.09; g.add(eyeR);
+  const tailBase = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.05, 0.3, 10), furMat);
+  tailBase.rotation.z = -0.6; tailBase.position.set(-0.5, 0.42, 0); g.add(tailBase);
+  const tailTip = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.02, 0.24, 10), darkMat);
+  tailTip.rotation.z = -1.0; tailTip.position.set(-0.72, 0.58, 0); g.add(tailTip);
+  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 8), eyeMat);
+  eyeL.position.set(0.64, 0.47, 0.085); g.add(eyeL);
+  const eyeR = eyeL.clone(); eyeR.position.z = -0.085; g.add(eyeR);
 
   g.userData.legs = legs;
   g.userData.materials = [furMat, darkMat];
   return g;
 }
-const wolfMesh = buildWolf();
-scene.add(wolfMesh);
+function buildSkeletonMesh(){
+  const g = new THREE.Group();
+  const boneMat = new THREE.MeshStandardMaterial({ color: 0xe8dfc8, roughness: 0.6 });
+  const jointMat = new THREE.MeshStandardMaterial({ color: 0xb0a486, roughness: 0.6 });
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0x7fffcf, emissive: 0x1f9070, emissiveIntensity: 1.1 });
+  const metalMat = new THREE.MeshStandardMaterial({ color: 0x8a6a4a, metalness: 0.3, roughness: 0.6 });
+  const cloakMat = new THREE.MeshStandardMaterial({ color: 0x2e2a22, roughness: 0.95 });
+
+  const cloak = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.24, 0.85, 8, 1, true), cloakMat);
+  cloak.position.set(-0.09, 0.48, 0); g.add(cloak);
+
+  const pelvis = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 10), jointMat);
+  pelvis.scale.set(1.2, 0.7, 0.9); pelvis.position.set(0, 0.62, 0); g.add(pelvis);
+  const spine = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.3, 10), boneMat);
+  spine.position.set(0, 0.85, 0); g.add(spine);
+  const ribGeo = new THREE.TorusGeometry(0.13, 0.018, 8, 16, Math.PI*1.5);
+  for(let i=0;i<3;i++){
+    const rib = new THREE.Mesh(ribGeo, boneMat);
+    rib.rotation.set(Math.PI/2, 0, Math.PI*0.75);
+    rib.position.set(0, 0.78+i*0.09, 0);
+    g.add(rib);
+  }
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 12), boneMat);
+  skull.position.set(0, 1.14, 0); skull.castShadow=true; g.add(skull);
+  const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.05, 0.1), boneMat);
+  jaw.position.set(0, 1.05, 0.02); g.add(jaw);
+  [-0.05, 0.05].forEach(dx=>{
+    const socket = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 8), eyeMat);
+    socket.position.set(dx, 1.15, 0.11); g.add(socket);
+  });
+  const shoulderGeo = new THREE.SphereGeometry(0.06, 10, 8);
+  const upperArmGeo = new THREE.CylinderGeometry(0.035, 0.04, 0.24, 8);
+  const forearmGeo = new THREE.CylinderGeometry(0.028, 0.033, 0.22, 8);
+  const handGeo = new THREE.SphereGeometry(0.045, 8, 8);
+  const arms = [];
+  [-0.16, 0.16].forEach((dx,i)=>{
+    const shoulder = new THREE.Mesh(shoulderGeo, jointMat); shoulder.position.set(dx, 0.95, 0); g.add(shoulder);
+    const upperArm = new THREE.Mesh(upperArmGeo, boneMat); upperArm.position.set(dx*1.35, 0.82, 0); upperArm.rotation.z = i===0?0.35:-0.35; g.add(upperArm);
+    const forearm = new THREE.Mesh(forearmGeo, boneMat); forearm.position.set(dx*1.7, 0.62, 0.05); forearm.rotation.x = -0.5; g.add(forearm);
+    const hand = new THREE.Mesh(handGeo, jointMat); hand.position.set(dx*1.8, 0.5, 0.12); g.add(hand);
+    arms.push(upperArm);
+  });
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.42, 0.02), metalMat);
+  blade.position.set(0.3, 0.36, 0.12); blade.rotation.z = -0.3; g.add(blade);
+  const hilt = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.1, 8), jointMat);
+  hilt.position.set(0.22, 0.55, 0.12); hilt.rotation.z = -0.3; g.add(hilt);
+
+  const thighGeo = new THREE.CylinderGeometry(0.045, 0.05, 0.28, 8);
+  const shinGeo = new THREE.CylinderGeometry(0.035, 0.04, 0.26, 8);
+  const footGeo = new THREE.BoxGeometry(0.09, 0.05, 0.16);
+  const legs = [];
+  [-0.08, 0.08].forEach(dx=>{
+    const thigh = new THREE.Mesh(thighGeo, boneMat); thigh.position.set(dx, 0.42, 0); g.add(thigh); legs.push(thigh);
+    const shin = new THREE.Mesh(shinGeo, boneMat); shin.position.set(dx, 0.18, 0); g.add(shin);
+    const foot = new THREE.Mesh(footGeo, jointMat); foot.position.set(dx, 0.03, 0.03); g.add(foot);
+  });
+
+  g.userData.legs = legs;
+  g.userData.arms = arms;
+  g.userData.materials = [boneMat, jointMat];
+  return g;
+}
+function buildBatMesh(){
+  const g = new THREE.Group();
+  const furMat = new THREE.MeshStandardMaterial({ color: 0x241832, roughness: 0.75 });
+  const wingMat = new THREE.MeshStandardMaterial({ color: 0x3a2a52, roughness: 0.6, side: THREE.DoubleSide });
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xc060ff, emissive: 0x6a1fb0, emissiveIntensity: 1.1 });
+  const fangMat = new THREE.MeshStandardMaterial({ color: 0xe8dcc4, roughness: 0.4 });
+
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 10), furMat);
+  body.scale.set(1.1, 0.9, 0.85); body.castShadow=true; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), furMat);
+  head.position.set(0.16, 0.05, 0); g.add(head);
+  [-0.05, 0.05].forEach(dz=>{
+    const ear = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.11, 8), furMat);
+    ear.position.set(0.12, 0.16, dz); ear.rotation.x = -0.3; g.add(ear);
+  });
+  [-0.035, 0.035].forEach(dz=>{
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 8), eyeMat);
+    eye.position.set(0.24, 0.06, dz); g.add(eye);
+  });
+  [-0.02, 0.02].forEach(dz=>{
+    const fang = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.03, 6), fangMat);
+    fang.position.set(0.24, -0.03, dz); fang.rotation.x = Math.PI; g.add(fang);
+  });
+  const wingBoneGeo = new THREE.CylinderGeometry(0.012, 0.018, 0.32, 6);
+  function buildWing(sign){
+    const wing = new THREE.Group();
+    const membrane = new THREE.Mesh(new THREE.ConeGeometry(0.38, 0.05, 3), wingMat);
+    membrane.rotation.x = Math.PI/2;
+    membrane.rotation.y = sign>0 ? 0 : Math.PI;
+    membrane.scale.set(1.3, 1, 1);
+    membrane.position.set(0, 0, sign*0.2);
+    wing.add(membrane);
+    for(let i=0;i<3;i++){
+      const bone = new THREE.Mesh(wingBoneGeo, furMat);
+      bone.rotation.x = Math.PI/2;
+      bone.position.set(0.02+i*0.02, 0, sign*(0.06+i*0.09));
+      wing.add(bone);
+    }
+    wing.position.set(0.02, 0.03, sign*0.08);
+    return wing;
+  }
+  const wingL = buildWing(-1); g.add(wingL);
+  const wingR = buildWing(1); g.add(wingR);
+  const footGeo = new THREE.ConeGeometry(0.02, 0.06, 6);
+  [-0.06, 0.06].forEach(dz=>{
+    const foot = new THREE.Mesh(footGeo, furMat); foot.position.set(-0.05, -0.16, dz); foot.rotation.x = Math.PI; g.add(foot);
+  });
+
+  g.userData.wings = [wingL, wingR];
+  g.userData.materials = [furMat, wingMat];
+  return g;
+}
+Object.assign(ENEMY_DEFS.wolf, {
+  buildMesh: buildWolfMesh,
+  animate(mesh, ctx){
+    const flashOn = ctx.hitFlash>0;
+    mesh.userData.materials[0].color.setHex(flashOn?0xffffff:0x3a3532);
+    mesh.userData.materials[1].color.setHex(flashOn?0xffffff:0x1c1a18);
+    const legBob = Math.sin(ctx.t*0.01)*0.06;
+    mesh.userData.legs.forEach((leg,i)=> leg.position.y = 0.17 + (i%2===0?legBob:-legBob));
+  }
+});
+Object.assign(ENEMY_DEFS.skeleton, {
+  buildMesh: buildSkeletonMesh,
+  animate(mesh, ctx){
+    const flashOn = ctx.hitFlash>0;
+    mesh.userData.materials[0].color.setHex(flashOn?0xffffff:0xe8dfc8);
+    mesh.userData.materials[1].color.setHex(flashOn?0xffffff:0xb0a486);
+    const sway = Math.sin(ctx.t*0.009)*0.14;
+    mesh.userData.legs.forEach((leg,i)=> leg.rotation.x = i===0?sway:-sway);
+    mesh.userData.arms.forEach((arm,i)=> arm.rotation.x = (i===0?-sway:sway)*0.6);
+  }
+});
+Object.assign(ENEMY_DEFS.bat, {
+  buildMesh: buildBatMesh,
+  animate(mesh, ctx){
+    const flashOn = ctx.hitFlash>0;
+    mesh.userData.materials[0].color.setHex(flashOn?0xffffff:0x241832);
+    mesh.userData.materials[1].color.setHex(flashOn?0xffffff:0x3a2a52);
+    const flap = Math.sin(ctx.t*0.02);
+    mesh.userData.wings[0].rotation.x = flap*0.9;
+    mesh.userData.wings[1].rotation.x = -flap*0.9;
+  }
+});
+function disposeMesh(root){
+  root.traverse(o=>{
+    if(o.geometry) o.geometry.dispose();
+    if(o.material){
+      if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose());
+      else o.material.dispose();
+    }
+  });
+}
+function rebuildEnemyMesh(){
+  if(typeof enemyMesh !== 'undefined' && enemyMesh){ scene.remove(enemyMesh); disposeMesh(enemyMesh); }
+  enemyMesh = ENEMY_DEFS[enemy.kind].buildMesh();
+  scene.add(enemyMesh);
+}
+let enemyMesh = ENEMY_DEFS[enemy.kind].buildMesh();
+scene.add(enemyMesh);
 
 /* ---- per-class first-person viewmodel ---- */
 function buildViewmodel(cls, tier){
@@ -1545,18 +1753,19 @@ bindHold('tTalk', ()=>tryInteract(), ()=>{});
 
 /* ================= ATTACK ================= */
 let daggerSwing = 0;
-function damageWolf(amount, fromAlly){
-  wolf.hp -= amount; wolf.hitFlash = 180;
+function damageEnemy(amount, fromAlly){
+  const def = ENEMY_DEFS[enemy.kind];
+  enemy.hp -= amount; enemy.hitFlash = 180;
   if(!fromAlly){
     const heal = computeLifesteal(player.skills, player.equipment.trinket);
     if(heal>0) player.hp = Math.min(player.maxHp, player.hp+heal);
   }
-  if(wolf.hp<=0){
-    wolf.alive=false; kills++; killsThisLevel++;
-    showMsg('The wolf falls!');
-    wolfMesh.visible=false;
-    awardXp(12);
-    spawnLootDrop(wolf.x, wolf.z);
+  if(enemy.hp<=0){
+    enemy.alive=false; kills++; killsThisLevel++;
+    showMsg(def.fallMsg);
+    enemyMesh.visible=false;
+    awardXp(def.xp);
+    spawnLootDrop(enemy.x, enemy.z);
     updateHud();
     const levelDef = LEVEL_DEFS[levelIndex];
     if(killsThisLevel >= levelDef.killsToAdvance){
@@ -1568,9 +1777,9 @@ function damageWolf(amount, fromAlly){
     } else {
       setTimeout(()=>{
         if(gameState!=='playing') return;
-        respawnWolf(player);
-        wolfMesh.visible=true;
-        showMsg('A wolf howls nearby...');
+        respawnEnemy(player);
+        enemyMesh.visible=true;
+        showMsg('Something stirs nearby...');
       }, 1400);
     }
   }
@@ -1586,8 +1795,8 @@ function tryAttack(){
   const dmg = Math.round(computeDamage(weapon.baseDamage, player.skills, null) * buffMult);
 
   if(def.atkType==='melee'){
-    if(!wolf.alive){ showMsg('Miss!'); return; }
-    const dx = wolf.x-player.x, dz = wolf.z-player.z;
+    if(!enemy.alive){ showMsg('Miss!'); return; }
+    const dx = enemy.x-player.x, dz = enemy.z-player.z;
     const dist = Math.hypot(dx,dz);
     const targetYaw = Math.atan2(-dx, -dz);
     let diff = targetYaw - player.yaw;
@@ -1595,16 +1804,16 @@ function tryAttack(){
     while(diff<-Math.PI) diff+=Math.PI*2;
     const inCone = Math.abs(diff) < 0.32;
     const inRange = dist < def.range;
-    const sees = hasLineOfSight(player.x, player.z, wolf.x, wolf.z);
+    const sees = hasLineOfSight(player.x, player.z, enemy.x, enemy.z);
     if(inCone && inRange && sees){
-      damageWolf(dmg);
+      damageEnemy(dmg);
       showMsg('Hit!');
       // Warrior tier>=1: Sunstrike - every 4th successful hit triggers a bonus shockwave
       if(player.cls==='warrior' && weaponTierUnlocked(player,1)){
         player.hitCounter++;
-        if(player.hitCounter%4===0 && wolf.alive){
+        if(player.hitCounter%4===0 && enemy.alive){
           const bonus = Math.round(dmg*0.5);
-          damageWolf(bonus);
+          damageEnemy(bonus);
           spawnBurstFx(0xffd23f, 1.6);
           showMsg('Sunstrike!');
         }
@@ -1691,16 +1900,16 @@ function updateAllies(dt, dtMs){
   allies = allies.filter(a=>{
     a.life -= dtMs;
     if(a.life<=0){ scene.remove(a.mesh); return false; }
-    if(wolf.alive){
-      const step = wolfStep(a.x, a.z, wolf.x, wolf.z, 1.7, dt, 0.25);
+    if(enemy.alive){
+      const step = wolfStep(a.x, a.z, enemy.x, enemy.z, 1.7, dt, 0.25);
       a.x = step.x; a.z = step.z;
       a.attackCd = Math.max(0, a.attackCd-dtMs);
-      if(Math.hypot(a.x-wolf.x, a.z-wolf.z) <= 1.0 && a.attackCd<=0){
+      if(Math.hypot(a.x-enemy.x, a.z-enemy.z) <= 1.0 && a.attackCd<=0){
         a.attackCd = 750;
-        damageWolf(a.dmg, true);
+        damageEnemy(a.dmg, true);
       }
     }
-    const faceAngle = wolf.alive ? Math.atan2(-(wolf.z-a.z), wolf.x-a.x) : 0;
+    const faceAngle = enemy.alive ? Math.atan2(-(enemy.z-a.z), enemy.x-a.x) : 0;
     a.mesh.position.set(a.x, 0, a.z);
     a.mesh.rotation.y = faceAngle;
     return true;
@@ -1721,8 +1930,8 @@ function trySpecial(){
     if(existing){
       player.specialCd = Math.max(2000, spec.cooldown*0.4);
       existing.attackCd = 0;
-      if(wolf.alive && Math.hypot(existing.x-wolf.x, existing.z-wolf.z) <= 1.4){
-        damageWolf(Math.round(existing.dmg*1.5), true);
+      if(enemy.alive && Math.hypot(existing.x-enemy.x, existing.z-enemy.z) <= 1.4){
+        damageEnemy(Math.round(existing.dmg*1.5), true);
       }
       spawnBurstFx(def.color, 1.0);
       showMsg('Rally Call!');
@@ -1750,17 +1959,17 @@ function trySpecial(){
     showMsg('Arcane Nova!');
   } else if(spec.kind==='burst'){
     const radius = (player.cls==='warrior' && legendary) ? spec.radius*1.4 : spec.radius;
-    if(wolf.alive){
-      const d = Math.hypot(wolf.x-player.x, wolf.z-player.z);
-      if(d <= radius && hasLineOfSight(player.x,player.z,wolf.x,wolf.z)){
+    if(enemy.alive){
+      const d = Math.hypot(enemy.x-player.x, enemy.z-player.z);
+      if(d <= radius && hasLineOfSight(player.x,player.z,enemy.x,enemy.z)){
         const dmg = specialBurstDamage(weapon.baseDamage, player.skills, null, spec.dmgMult);
-        damageWolf(dmg);
-        if(spec.stunMs) wolf.attackCd = Math.max(wolf.attackCd, spec.stunMs);
+        damageEnemy(dmg);
+        if(spec.stunMs) enemy.attackCd = Math.max(enemy.attackCd, spec.stunMs);
         // Warrior Legendary: Cleaving Roar adds a knockback push
         if(player.cls==='warrior' && legendary){
-          const kx=wolf.x-player.x, kz=wolf.z-player.z, kd=Math.hypot(kx,kz)||1;
-          const pushed = collideMove(wolf.x, wolf.z, wolf.x+(kx/kd)*1.5, wolf.z+(kz/kd)*1.5, 0.3);
-          wolf.x=pushed.x; wolf.z=pushed.z;
+          const kx=enemy.x-player.x, kz=enemy.z-player.z, kd=Math.hypot(kx,kz)||1;
+          const pushed = collideMove(enemy.x, enemy.z, enemy.x+(kx/kd)*1.5, enemy.z+(kz/kd)*1.5, 0.3);
+          enemy.x=pushed.x; enemy.z=pushed.z;
           showMsg('Cleaving Roar!');
         } else {
           showMsg(spec.name+'!');
@@ -1836,17 +2045,18 @@ function update(dtMs){
     player.x = resolved.x; player.z = resolved.z;
   }
 
-  if(wolf.alive){
-    wolf.hitFlash = Math.max(0, wolf.hitFlash - dtMs);
-    const effSpeed = wolf.speed * (wolf.slowMs>0 ? 0.5 : 1);
-    const step = wolfStep(wolf.x, wolf.z, player.x, player.z, effSpeed, dt, 0.3);
-    wolf.x = step.x; wolf.z = step.z;
-    wolf.attackCd = Math.max(0, wolf.attackCd - dtMs);
-    const d = Math.hypot(player.x-wolf.x, player.z-wolf.z);
-    if(d <= 1.1 && wolf.attackCd<=0){
-      wolf.attackCd = 900;
-      player.hp = Math.max(0, player.hp-6);
-      showMsg('The wolf bites you!');
+  if(enemy.alive){
+    const edef = ENEMY_DEFS[enemy.kind];
+    enemy.hitFlash = Math.max(0, enemy.hitFlash - dtMs);
+    const effSpeed = edef.speed * (enemy.slowMs>0 ? 0.5 : 1);
+    const step = wolfStep(enemy.x, enemy.z, player.x, player.z, effSpeed, dt, 0.3);
+    enemy.x = step.x; enemy.z = step.z;
+    enemy.attackCd = Math.max(0, enemy.attackCd - dtMs);
+    const d = Math.hypot(player.x-enemy.x, player.z-enemy.z);
+    if(d <= edef.atkRange && enemy.attackCd<=0){
+      enemy.attackCd = edef.atkCdMs;
+      player.hp = Math.max(0, player.hp-edef.dmg);
+      showMsg(edef.biteMsg);
       updateHud();
     }
   }
@@ -1855,8 +2065,8 @@ function update(dtMs){
 
   // projectiles
   projectiles = projectiles.filter(pr=>{
-    if(pr.homing && wolf.alive){
-      const hx=wolf.x-pr.x, hz=wolf.z-pr.z, hd=Math.hypot(hx,hz)||1;
+    if(pr.homing && enemy.alive){
+      const hx=enemy.x-pr.x, hz=enemy.z-pr.z, hd=Math.hypot(hx,hz)||1;
       const speed = Math.hypot(pr.vx,pr.vz);
       pr.vx += (hx/hd)*speed*0.12; pr.vz += (hz/hd)*speed*0.12;
       const newSpeed=Math.hypot(pr.vx,pr.vz)||1;
@@ -1866,10 +2076,10 @@ function update(dtMs){
     pr.x=next.x; pr.z=next.z; pr.life-=dtMs;
     pr.mesh.position.set(pr.x, EYE_HEIGHT-0.1, pr.z);
     let alive = pr.life>0 && !isWall(pr.x,pr.z);
-    if(alive && wolf.alive && projectileHits(pr.x,pr.z,wolf.x,wolf.z,0.5)){
-      damageWolf(pr.damage);
-      if(pr.element==='ice') wolf.slowMs = 2000;
-      if(pr.element==='fire'){ wolf.dotMs = 3000; wolf.dotTickMs = 500; wolf.dotDmg = 3; }
+    if(alive && enemy.alive && projectileHits(pr.x,pr.z,enemy.x,enemy.z,ENEMY_DEFS[enemy.kind].hitRadius)){
+      damageEnemy(pr.damage);
+      if(pr.element==='ice') enemy.slowMs = 2000;
+      if(pr.element==='fire'){ enemy.dotMs = 3000; enemy.dotTickMs = 500; enemy.dotDmg = 3; }
       if(pr.soulDrain) player.hp = Math.min(player.maxHp, player.hp+3);
       if(pr.splashOnHit) spawnBurstFx(0xff9d3d, 1.1);
       alive=false;
@@ -1878,12 +2088,12 @@ function update(dtMs){
     return alive;
   });
 
-  // wolf status effects (slow / damage-over-time from Elemental Alternation)
-  if(wolf.alive){
-    wolf.slowMs = Math.max(0, wolf.slowMs-dtMs);
-    if(wolf.dotMs>0){
-      wolf.dotMs -= dtMs; wolf.dotTickMs -= dtMs;
-      if(wolf.dotTickMs<=0){ wolf.dotTickMs=500; if(wolf.alive) damageWolf(wolf.dotDmg); }
+  // enemy status effects (slow / damage-over-time from Elemental Alternation)
+  if(enemy.alive){
+    enemy.slowMs = Math.max(0, enemy.slowMs-dtMs);
+    if(enemy.dotMs>0){
+      enemy.dotMs -= dtMs; enemy.dotTickMs -= dtMs;
+      if(enemy.dotTickMs<=0){ enemy.dotTickMs=500; if(enemy.alive) damageEnemy(enemy.dotDmg); }
     }
   }
 
@@ -1920,14 +2130,15 @@ function update(dtMs){
   camera.rotation.y = player.yaw;
   camera.rotation.x = player.pitch;
 
-  wolfMesh.position.set(wolf.x, 0, wolf.z);
-  const faceAngle = Math.atan2(-(player.z-wolf.z), player.x-wolf.x);
-  wolfMesh.rotation.y = faceAngle;
-  const flashOn = wolf.hitFlash>0;
-  wolfMesh.userData.materials[0].color.setHex(flashOn?0xffffff:0x8a6a42);
-  wolfMesh.userData.materials[1].color.setHex(flashOn?0xffffff:0x4a3826);
-  const legBob = Math.sin(performance.now()*0.01)*0.06;
-  wolfMesh.userData.legs.forEach((leg,i)=> leg.position.y = 0.16 + (i%2===0?legBob:-legBob));
+  {
+    const edef = ENEMY_DEFS[enemy.kind];
+    const flyBob = edef.flying ? Math.sin(performance.now()*0.004)*0.08 : 0;
+    const groundY = edef.flying ? 1.15 + flyBob : 0;
+    enemyMesh.position.set(enemy.x, groundY, enemy.z);
+    const faceAngle = Math.atan2(-(player.z-enemy.z), player.x-enemy.x);
+    enemyMesh.rotation.y = faceAngle;
+    edef.animate(enemyMesh, { hitFlash: enemy.hitFlash, t: performance.now() });
+  }
 
   if(viewmodelGroup.parent) camera.remove(viewmodelGroup);
   viewmodelGroup.position.set(0.22,-0.22,-0.4);
@@ -1980,7 +2191,7 @@ function renderMinimap(){
   const fx=-Math.sin(player.yaw), fz=-Math.cos(player.yaw);
   mg.beginPath(); mg.moveTo(player.x*cell, player.z*cell);
   mg.lineTo(player.x*cell+fx*9, player.z*cell+fz*9); mg.stroke();
-  if(wolf.alive){ mg.fillStyle='#ff5c6c'; mg.beginPath(); mg.arc(wolf.x*cell, wolf.z*cell, 3,0,Math.PI*2); mg.fill(); }
+  if(enemy.alive){ mg.fillStyle='#'+ENEMY_DEFS[enemy.kind].color.toString(16).padStart(6,'0'); mg.beginPath(); mg.arc(enemy.x*cell, enemy.z*cell, 3,0,Math.PI*2); mg.fill(); }
   lootDrops.forEach(d=>{ mg.fillStyle='#4fd8c4'; mg.beginPath(); mg.arc(d.x*cell,d.z*cell,2,0,Math.PI*2); mg.fill(); });
 }
 
@@ -2002,7 +2213,7 @@ buildClassSelect();
 
 document.getElementById('startBtn').onclick = ()=>{
   player = newPlayer(selectedClass);
-  respawnWolf(player);
+  respawnEnemy(player);
   viewmodelGroup = buildViewmodel(selectedClass, 0);
   projectiles.forEach(pr=>scene.remove(pr.mesh)); projectiles=[];
   allies.forEach(a=>scene.remove(a.mesh)); allies=[];
@@ -2116,11 +2327,11 @@ window.__GAME3D_DEBUG__ = {
   computeLifesteal, xpForLevel, applyXp, spendSkillPoint, rescaleHpForNewMax, rollLootRarity, pickItemOfRarity,
   stepProjectile, projectileHits, volleyAngles, specialBurstDamage, rollLootKind, weaponTierForRarity,
   pointsFarEnough, doorwaysWideEnough, pointLightAttenuation,
-  getPlayer:()=>player, getWolf:()=>wolf, getAllies:()=>allies, getProjectiles:()=>projectiles,
+  getPlayer:()=>player, getEnemy:()=>enemy, ENEMY_DEFS, scaleEnemyMaxHp, pickEnemyKind, getAllies:()=>allies, getProjectiles:()=>projectiles,
   getLevelIndex:()=>levelIndex, getKillsThisLevel:()=>killsThisLevel, getLoopCount:()=>loopCount,
   getKills:()=>kills, getLootDrops:()=>lootDrops, getCurrentLevel:()=>currentLevel,
   newPlayer, update, tryAttack, trySpecial, buildClassSelect, buildSkillScreen,
-  buildLevelGeometry, advanceLevel, damageWolf, equipWeaponTier, spawnLootDrop,
+  buildLevelGeometry, advanceLevel, damageEnemy, equipWeaponTier, spawnLootDrop,
   setGameState:(s)=>{gameState=s;}, setRunning:(r)=>{running=r;}, setSelectedClass:(c)=>{selectedClass=c;}
 };
 })();
