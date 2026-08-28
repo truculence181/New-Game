@@ -136,7 +136,7 @@
     position:absolute; right:calc(16px + env(safe-area-inset-right,0px)); top:50%; transform:translateY(-50%);
     z-index:7; flex-direction:column; align-items:center; gap:14px;
   }
-  #tAttack, #tSpecial{
+  #tAttack, #tSpecial, #tTalk{
     width:clamp(56px,16vh,72px); height:clamp(56px,16vh,72px); border-radius:50%;
     color:#fff; display:flex; align-items:center; justify-content:center;
     font-size:clamp(.95rem,3.6vh,1.3rem); user-select:none; touch-action:none;
@@ -476,6 +476,23 @@ function findOpenCells() {
   for (let z = 0; z < MAP_H; z++)
     for (let x = 0; x < MAP_W; x++)
       if (MAP[z][x] === 0) cells.push({ x: x + 0.5, z: z + 0.5 });
+  return cells;
+}
+function findDeadEndCells(maxOpenNeighbors) {
+  // A cell counts as a nook if it has at most maxOpenNeighbors open orthogonal
+  // neighbors. deg===1 is a true corridor dead end; deg===0 is an unreachable
+  // sealed-off pocket and is always excluded even if maxOpenNeighbors allows it.
+  const cells = [];
+  for (let z = 0; z < MAP_H; z++)
+    for (let x = 0; x < MAP_W; x++) {
+      if (MAP[z][x] !== 0) continue;
+      let openN = 0;
+      [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dz])=>{
+        const nx=x+dx, nz=z+dz;
+        if (nx>=0 && nx<MAP_W && nz>=0 && nz<MAP_H && MAP[nz][nx]===0) openN++;
+      });
+      if (openN >= 1 && openN <= maxOpenNeighbors) cells.push({ x: x+0.5, z: z+0.5 });
+    }
   return cells;
 }
 function wolfStep(wx, wz, px, pz, speed, dtSeconds, radius) {
@@ -1052,6 +1069,17 @@ function buildLevelGeometry(levelDef){
     return picked;
   }
 
+  // Place the NPC in a dead end / quiet alcove, not open corridor traffic, and
+  // claim its cell FIRST so no torch/prop can later spawn on top of it.
+  let npc = null;
+  const npcDef = NPC_DEFS[levelDef.id];
+  if(npcDef){
+    const spot = findDeadEndCells(1)[0] || findDeadEndCells(2)[0] || allCells[0];
+    const idx = allCells.findIndex(c=>c.x===spot.x && c.z===spot.z);
+    if(idx>=0) claimed.add(idx);
+    npc = addNpc(spot.x, spot.z, npcDef);
+  }
+
   const torches = [];
   const fills = [];
   if(theme.useTorches){
@@ -1080,13 +1108,6 @@ function buildLevelGeometry(levelDef){
   rubbleCells.forEach(c=>props.push(...addRubble(c.x,c.z)));
   if(theme.useColumns){
     claimCells(i=>i%17===7, 3).forEach(c=>props.push(...addColumn(c.x,c.z)));
-  }
-
-  let npc = null;
-  const npcDef = NPC_DEFS[levelDef.id];
-  if(npcDef){
-    const spot = claimCells(i=>i%19===3, 1)[0] || allCells.find((c,i)=>!claimed.has(i));
-    if(spot) npc = addNpc(spot.x, spot.z, npcDef);
   }
 
   currentLevel = { wallGroup, floorMesh, ceilingMesh, beams, torches, fills, props, npc };
