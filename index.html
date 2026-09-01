@@ -153,6 +153,14 @@
     border-radius:20px; pointer-events:none; white-space:nowrap; text-shadow:0 1px 3px #000;
   }
   #interactPrompt.hidden{ display:none; }
+  #bossBar{
+    position:absolute; top:calc(10px + env(safe-area-inset-top,0px)); left:50%; transform:translateX(-50%);
+    z-index:6; width:min(70vw,360px); text-align:center; pointer-events:none;
+  }
+  #bossBar.hidden{ display:none; }
+  #bossName{ font-family:'Cinzel',serif; font-size:.72rem; color:#ff5c6c; text-shadow:0 1px 3px #000; margin-bottom:3px; }
+  #bossHpBar{ height:11px; border-radius:6px; background:rgba(0,0,0,.55); overflow:hidden; border:1px solid rgba(255,92,108,.5); }
+  #bossHpFill{ height:100%; background:linear-gradient(90deg,#ff2020,#ff8a3d); width:100%; transition:width .15s; }
 
   #screen-dialogue{
     position:absolute; left:50%; bottom:calc(14px + env(safe-area-inset-bottom,0px));
@@ -199,6 +207,10 @@
     <div id="killDisplay">Wolves defeated: 0</div>
   </div>
 
+  <div id="bossBar" class="hidden">
+    <div id="bossName">Boss</div>
+    <div id="bossHpBar"><div id="bossHpFill"></div></div>
+  </div>
   <div id="msg"></div>
   <div id="interactPrompt" class="hidden">Press F to talk</div>
   <div id="controls-note" class="desktop-only">WASD move · mouse look (click to lock) · click/Space attack · E/right-click special · F talk · Esc releases mouse · ⭐ skill tree</div>
@@ -544,6 +556,54 @@ function pickEnemyKind(levelDef){
   const pool = (levelDef && levelDef.enemyKinds) ? levelDef.enemyKinds : ['wolf'];
   return pool[Math.floor(Math.random()*pool.length)];
 }
+/* ---- Boss registry: elite reskins of the base creatures, one randomly chosen
+   every time a boss encounter triggers (every 5 player levels). Same stat
+   shape as ENEMY_DEFS plus a few boss-only fields (xpMult, armorPct, and an
+   enrage phase at low HP) so all existing combat code (damageEnemy, the AI
+   step in update(), projectile hits, minimap) can treat a boss as just another
+   `enemy.kind` via the defFor() lookup below. ---- */
+const BOSS_DEFS = {
+  ashenColossus: { name:'Ashen Colossus', baseHp:240, hpPerLevel:28, hpPerLoop:80, speed:0.9, dmg:15, atkRange:1.3, atkCdMs:1250, hitRadius:0.7, xp:40, xpMult:6, flying:false,
+    armorPct:0.15, enrageHpPct:0.3, enrageDmgMult:1.4, enrageSpeedMult:1.1,
+    biteMsg:'The Ashen Colossus crashes its blade down!', fallMsg:'The Ashen Colossus splinters into ash and embers!', color:0xffd27a, baseKind:'skeleton' },
+  direfangAlpha: { name:'Direfang Alpha', baseHp:190, hpPerLevel:22, hpPerLoop:60, speed:1.9, dmg:12, atkRange:1.1, atkCdMs:700, hitRadius:0.6, xp:36, xpMult:6, flying:false,
+    enrageHpPct:0.4, enrageDmgMult:1.25, enrageSpeedMult:1.35,
+    biteMsg:'Direfang Alpha tears at you in a frenzy!', fallMsg:'Direfang Alpha falls, and the pack-howl fades!', color:0xff2f2f, baseKind:'wolf' },
+  shriekQueenPrime: { name:'Shriek Queen Prime', baseHp:160, hpPerLevel:20, hpPerLoop:55, speed:2.6, dmg:10, atkRange:1.0, atkCdMs:550, hitRadius:0.55, xp:32, xpMult:6, flying:true,
+    enrageHpPct:0.45, enrageDmgMult:1.5, enrageSpeedMult:1.2,
+    biteMsg:'Shriek Queen Prime dives in with a piercing screech!', fallMsg:'Shriek Queen Prime plummets, wings finally still!', color:0xe040fb, baseKind:'bat' },
+};
+function pickBossKind(){
+  const keys = Object.keys(BOSS_DEFS);
+  return keys[Math.floor(Math.random()*keys.length)];
+}
+function scaleBossMaxHp(kind, level, loop){
+  const def = BOSS_DEFS[kind];
+  return def.baseHp + (level-1)*def.hpPerLevel + loop*def.hpPerLoop;
+}
+/* Generalized lookup so combat code works the same whether enemy.kind is a
+   regular ENEMY_DEFS entry or a BOSS_DEFS entry. */
+function defFor(kind){ return ENEMY_DEFS[kind] || BOSS_DEFS[kind]; }
+/* XP scales relative to the player's own level (and loop depth) rather than
+   being a flat per-kind constant, so a level-10 player fighting level-10-scaled
+   enemies gets level-10-appropriate XP instead of the same trickle as level 1. */
+function enemyXpReward(kind, playerLevel, loop){
+  const def = defFor(kind);
+  const levelMult = 1 + (playerLevel-1)*0.16;
+  const loopMult = 1 + (loop||0)*0.10;
+  const bossMult = def.xpMult || 1;
+  return Math.round(def.xp * levelMult * loopMult * bossMult);
+}
+/* Boss milestone tracking: every 5 player levels queues a boss encounter,
+   which is spawned the next time an enemy would normally respawn (see
+   spawnNextEncounter). Kept as plain state + a pure predicate so it's easy
+   to unit test in isolation from the render loop. */
+function nextBossThreshold(currentThreshold, playerLevel){
+  let t = currentThreshold;
+  let triggered = false;
+  while(playerLevel >= t){ triggered = true; t += 5; }
+  return { threshold:t, triggered };
+}
 // Three-tier weapon progression per class (Starter -> Discovered -> Legendary),
 // adapted from the design spec. Each tier's baseDamage REPLACES the class's
 // base damage while equipped; `unlock` keys gate the proc effects below.
@@ -602,8 +662,11 @@ const SKILL_DEFS = {
   swiftness:  { name:'Swiftness',  icon:'👟', maxRank:3, desc:'+6% move speed per rank' },
   focus:      { name:'Focus',      icon:'⏱️', maxRank:3, desc:'-8% attack cooldown per rank' },
   vampirism:  { name:'Vampirism',  icon:'🩸', maxRank:3, desc:'Heal 2 HP per rank on hit' },
+  // Deeper tree nodes that open up once you've proven yourself - unlock at level 10.
+  overcharge: { name:'Overcharge', icon:'⚡', maxRank:3, desc:'-10% special cooldown per rank', unlockLevel:10 },
+  resilience: { name:'Resilience', icon:'🛡️', maxRank:3, desc:'-10% damage taken per rank', unlockLevel:10 },
 };
-const SKILL_ORDER = ['vitality','might','swiftness','focus','vampirism'];
+const SKILL_ORDER = ['vitality','might','swiftness','focus','vampirism','overcharge','resilience'];
 const SPECIAL_DEFS = {
   warrior:     { name:'Shield Bash',   cooldown:6000, kind:'burst',  radius:2.4, dmgMult:1.3, stunMs:1500 },
   mage:        { name:'Arcane Nova',   cooldown:7000, kind:'burst',  radius:3.2, dmgMult:1.7 },
@@ -654,9 +717,10 @@ function applyXp(state, amount) {
   while (xp >= xpForLevel(level)) { xp -= xpForLevel(level); level++; skillPoints++; leveled = true; }
   return { level, xp, skillPoints, leveled };
 }
-function spendSkillPoint(skills, skillPoints, key) {
+function spendSkillPoint(skills, skillPoints, key, playerLevel) {
   const def = SKILL_DEFS[key];
   if (!def || skillPoints <= 0) return { skills, skillPoints, spent: false };
+  if (def.unlockLevel && (playerLevel || 1) < def.unlockLevel) return { skills, skillPoints, spent: false };
   const cur = skills[key] || 0;
   if (cur >= def.maxRank) return { skills, skillPoints, spent: false };
   const newSkills = Object.assign({}, skills, { [key]: cur + 1 });
@@ -691,6 +755,30 @@ function volleyAngles(count, spread) {
 function specialBurstDamage(baseDmg, skills, weaponId, dmgMult) {
   return Math.round(computeDamage(baseDmg, skills, weaponId) * dmgMult);
 }
+/* Specials keep growing every 5 player levels (a "tier"), independent of and
+   stacking with the loot-based weapon-tier unlocks (Discovered/Legendary).
+   tier 0 = lvl 1-5, tier 1 = lvl 6-10, etc. Radius growth is capped so AoE
+   specials don't trivialize the map; bonusCount adds an extra volley arrow
+   every 2 tiers (10 levels). */
+function getSpecialLevelBonuses(level) {
+  const tier = Math.floor((level - 1) / 5);
+  return {
+    tier,
+    dmgMult: 1 + tier * 0.12,
+    radiusMult: 1 + Math.min(tier, 4) * 0.06,
+    cdMult: Math.max(0.7, 1 - tier * 0.05),
+    durationMult: 1 + tier * 0.08,
+    bonusCount: Math.floor(tier / 2),
+  };
+}
+function computeSpecialCooldown(baseCd, skills, cdMultFromLevel) {
+  const reduction = (skills.overcharge || 0) * 0.10;
+  return baseCd * Math.max(0.5, 1 - reduction) * (cdMultFromLevel || 1);
+}
+function computeDamageTaken(amount, skills) {
+  const reduction = (skills.resilience || 0) * 0.10;
+  return Math.max(1, Math.round(amount * Math.max(0.4, 1 - reduction)));
+}
 
 /* ================= SELECTION / GAME STATE ================= */
 let gameState = 'select'; // 'select' | 'playing'
@@ -698,12 +786,14 @@ let paused = false;
 let selectedClass = 'warrior';
 let player = null;
 const enemy = { kind:'wolf', hp: 30, maxHp: 30, alive: true, speed: 1.3, hitFlash: 0, attackCd: 0, x:0, z:0,
-  slowMs:0, dotMs:0, dotTickMs:0, dotDmg:0 };
+  slowMs:0, dotMs:0, dotTickMs:0, dotDmg:0, isBoss:false, enraged:false };
 let kills = 0;
 let totalLootFound = 0;
 let levelIndex = 0;
 let killsThisLevel = 0;
 let loopCount = 0;
+let nextBossLevel = 5;
+let bossPending = false;
 let projectiles = [];
 let allies = [];
 let lootDrops = [];
@@ -727,11 +817,36 @@ function respawnEnemy(nearExclude){
   const levelDef = LEVEL_DEFS[levelIndex];
   const kind = pickEnemyKind(levelDef);
   enemy.kind = kind;
+  enemy.isBoss = false; enemy.enraged = false;
   enemy.x = spot.x; enemy.z = spot.z;
   enemy.maxHp = scaleEnemyMaxHp(kind, player.level, loopCount);
   enemy.hp = enemy.maxHp; enemy.alive = true;
   enemy.slowMs = 0; enemy.dotMs = 0; enemy.dotTickMs = 0; enemy.dotDmg = 0; enemy.hitFlash = 0; enemy.attackCd = 0;
   rebuildEnemyMesh();
+  updateBossBar();
+}
+/* A random boss (see BOSS_DEFS) scaled to the player's current level/loop.
+   Fired from spawnNextEncounter() whenever a boss is pending, instead of a
+   normal pool pick - same enemy singleton, same combat code, just bigger
+   and meaner. */
+function spawnBoss(nearExclude){
+  const spot = randomOpenCell(nearExclude);
+  const kind = pickBossKind();
+  const bdef = BOSS_DEFS[kind];
+  enemy.kind = kind;
+  enemy.isBoss = true; enemy.enraged = false;
+  enemy.x = spot.x; enemy.z = spot.z;
+  enemy.maxHp = scaleBossMaxHp(kind, player.level, loopCount);
+  enemy.hp = enemy.maxHp; enemy.alive = true;
+  enemy.slowMs = 0; enemy.dotMs = 0; enemy.dotTickMs = 0; enemy.dotDmg = 0; enemy.hitFlash = 0; enemy.attackCd = 0;
+  rebuildEnemyMesh();
+  enemyMesh.visible = true;
+  showMsg('⚠ '+bdef.name+' emerges!');
+  updateBossBar();
+}
+function spawnNextEncounter(nearExclude){
+  if(bossPending){ bossPending = false; spawnBoss(nearExclude); }
+  else { respawnEnemy(nearExclude); }
 }
 function advanceLevel(){
   levelIndex++;
@@ -741,7 +856,7 @@ function advanceLevel(){
   buildLevelGeometry(def);
   const spot = randomOpenCell();
   player.x = spot.x; player.z = spot.z;
-  respawnEnemy(player);
+  spawnNextEncounter(player);
   enemyMesh.visible = true;
   showMsg(def.introText);
   updateHud();
@@ -761,6 +876,18 @@ function updateHud(){
   document.getElementById('lvlLabel').textContent = Math.floor(player.xp)+' / '+xpForLevel(player.level)+' XP';
   document.getElementById('killDisplay').textContent = levelDef.name+': '+killsThisLevel+'/'+levelDef.killsToAdvance+' · Total: '+kills;
   document.getElementById('skillBadge').classList.toggle('hidden', player.skillPoints<=0);
+  updateBossBar();
+}
+function updateBossBar(){
+  const wrap = document.getElementById('bossBar');
+  if(!wrap) return;
+  if(enemy.isBoss && enemy.alive){
+    wrap.classList.remove('hidden');
+    document.getElementById('bossName').textContent = '⚠ '+BOSS_DEFS[enemy.kind].name;
+    document.getElementById('bossHpFill').style.width = Math.max(0,100*enemy.hp/enemy.maxHp)+'%';
+  } else {
+    wrap.classList.add('hidden');
+  }
 }
 function refreshMaxHp(){
   const oldMax = player.maxHp;
@@ -771,7 +898,11 @@ function refreshMaxHp(){
 function awardXp(amount){
   const res = applyXp({level:player.level, xp:player.xp, skillPoints:player.skillPoints}, amount);
   player.level=res.level; player.xp=res.xp; player.skillPoints=res.skillPoints;
-  if(res.leveled){ showMsg('LEVEL UP! Level '+player.level); }
+  if(res.leveled){
+    showMsg('LEVEL UP! Level '+player.level);
+    const check = nextBossThreshold(nextBossLevel, player.level);
+    if(check.triggered){ bossPending = true; nextBossLevel = check.threshold; }
+  }
   updateHud();
 }
 
@@ -1342,6 +1473,45 @@ Object.assign(ENEMY_DEFS.bat, {
     mesh.userData.wings[1].rotation.x = -flap*0.9;
   }
 });
+/* Boss meshes reuse the base creature builder for their `baseKind`, then
+   scale it up and add a rotating emissive aura ring so a boss reads as a
+   boss at a glance (bigger silhouette + glow) without needing bespoke
+   geometry per boss. The base animate() is reused for limb/wing motion; the
+   aura spin and enrage color-shift are layered on top. */
+function buildBossAuraRing(color){
+  const geo = new THREE.TorusGeometry(0.55, 0.035, 8, 32);
+  const mat = new THREE.MeshStandardMaterial({ color, emissive:color, emissiveIntensity:1.1, transparent:true, opacity:0.75 });
+  const ring = new THREE.Mesh(geo, mat);
+  ring.rotation.x = Math.PI/2;
+  ring.position.y = 0.05;
+  return ring;
+}
+function buildBossMesh(bossKey){
+  const bdef = BOSS_DEFS[bossKey];
+  const baseDef = ENEMY_DEFS[bdef.baseKind];
+  const g = new THREE.Group();
+  const inner = baseDef.buildMesh();
+  inner.scale.set(1.55, 1.55, 1.55);
+  g.add(inner);
+  const aura = buildBossAuraRing(bdef.color);
+  g.add(aura);
+  g.userData.inner = inner;
+  g.userData.aura = aura;
+  return g;
+}
+Object.keys(BOSS_DEFS).forEach(bossKey=>{
+  const bdef = BOSS_DEFS[bossKey];
+  Object.assign(bdef, {
+    buildMesh: ()=>buildBossMesh(bossKey),
+    animate(mesh, ctx){
+      ENEMY_DEFS[bdef.baseKind].animate(mesh.userData.inner, ctx);
+      mesh.userData.aura.rotation.z += 0.02;
+      const enrageGlow = enemy.isBoss && enemy.enraged;
+      mesh.userData.aura.material.color.setHex(enrageGlow ? 0xff2020 : bdef.color);
+      mesh.userData.aura.material.emissive.setHex(enrageGlow ? 0xff2020 : bdef.color);
+    }
+  });
+});
 function disposeMesh(root){
   root.traverse(o=>{
     if(o.geometry) o.geometry.dispose();
@@ -1353,10 +1523,10 @@ function disposeMesh(root){
 }
 function rebuildEnemyMesh(){
   if(typeof enemyMesh !== 'undefined' && enemyMesh){ scene.remove(enemyMesh); disposeMesh(enemyMesh); }
-  enemyMesh = ENEMY_DEFS[enemy.kind].buildMesh();
+  enemyMesh = defFor(enemy.kind).buildMesh();
   scene.add(enemyMesh);
 }
-let enemyMesh = ENEMY_DEFS[enemy.kind].buildMesh();
+let enemyMesh = defFor(enemy.kind).buildMesh();
 scene.add(enemyMesh);
 
 /* ---- per-class first-person viewmodel ---- */
@@ -1754,33 +1924,47 @@ bindHold('tTalk', ()=>tryInteract(), ()=>{});
 /* ================= ATTACK ================= */
 let daggerSwing = 0;
 function damageEnemy(amount, fromAlly){
-  const def = ENEMY_DEFS[enemy.kind];
-  enemy.hp -= amount; enemy.hitFlash = 180;
+  const def = defFor(enemy.kind);
+  const mitigated = def.armorPct ? Math.max(1, Math.round(amount*(1-def.armorPct))) : amount;
+  enemy.hp -= mitigated; enemy.hitFlash = 180;
   if(!fromAlly){
     const heal = computeLifesteal(player.skills, player.equipment.trinket);
     if(heal>0) player.hp = Math.min(player.maxHp, player.hp+heal);
   }
   if(enemy.hp<=0){
-    enemy.alive=false; kills++; killsThisLevel++;
+    const wasBoss = enemy.isBoss;
+    enemy.alive=false; kills++;
     showMsg(def.fallMsg);
     enemyMesh.visible=false;
-    awardXp(def.xp);
+    awardXp(enemyXpReward(enemy.kind, player.level, loopCount));
     spawnLootDrop(enemy.x, enemy.z);
+    if(wasBoss) spawnLootDrop(enemy.x+0.4, enemy.z+0.4); // bosses always drop a bonus item
+    updateBossBar();
     updateHud();
-    const levelDef = LEVEL_DEFS[levelIndex];
-    if(killsThisLevel >= levelDef.killsToAdvance){
+    if(wasBoss){
       setTimeout(()=>{
         if(gameState!=='playing') return;
-        showMsg('The way forward opens...');
-        setTimeout(()=>{ if(gameState==='playing') advanceLevel(); }, 1200);
-      }, 1000);
-    } else {
-      setTimeout(()=>{
-        if(gameState!=='playing') return;
-        respawnEnemy(player);
+        spawnNextEncounter(player);
         enemyMesh.visible=true;
-        showMsg('Something stirs nearby...');
-      }, 1400);
+        showMsg('The halls fall quiet again...');
+      }, 1600);
+    } else {
+      killsThisLevel++;
+      const levelDef = LEVEL_DEFS[levelIndex];
+      if(killsThisLevel >= levelDef.killsToAdvance){
+        setTimeout(()=>{
+          if(gameState!=='playing') return;
+          showMsg('The way forward opens...');
+          setTimeout(()=>{ if(gameState==='playing') advanceLevel(); }, 1200);
+        }, 1000);
+      } else {
+        setTimeout(()=>{
+          if(gameState!=='playing') return;
+          spawnNextEncounter(player);
+          enemyMesh.visible=true;
+          showMsg(bossPending ? 'A powerful foe draws near...' : 'Something stirs nearby...');
+        }, 1400);
+      }
     }
   }
   updateHud();
@@ -1922,16 +2106,17 @@ function trySpecial(){
   const spec = SPECIAL_DEFS[player.cls];
   const weapon = WEAPON_TIERS[player.cls][player.weaponTier];
   const legendary = weaponTierUnlocked(player,2);
+  const lvlBonus = getSpecialLevelBonuses(player.level);
 
   // Beastmaster: if a companion is already out, Discovered-tier Rally Call
   // replaces re-summoning with an instant bonus attack instead.
   if(spec.kind==='summon' && player.cls==='beastmaster' && weaponTierUnlocked(player,1)){
     const existing = allies.find(a=>a.kind===spec.allyKind);
     if(existing){
-      player.specialCd = Math.max(2000, spec.cooldown*0.4);
+      player.specialCd = Math.max(2000, spec.cooldown*0.4*lvlBonus.cdMult);
       existing.attackCd = 0;
       if(enemy.alive && Math.hypot(existing.x-enemy.x, existing.z-enemy.z) <= 1.4){
-        damageEnemy(Math.round(existing.dmg*1.5), true);
+        damageEnemy(Math.round(existing.dmg*1.5*lvlBonus.dmgMult), true);
       }
       spawnBurstFx(def.color, 1.0);
       showMsg('Rally Call!');
@@ -1939,12 +2124,12 @@ function trySpecial(){
     }
   }
 
-  player.specialCd = spec.cooldown;
+  player.specialCd = computeSpecialCooldown(spec.cooldown, player.skills, lvlBonus.cdMult);
   daggerSwing = 1;
 
   if(spec.kind==='burst' && player.cls==='mage' && legendary){
     // Mage Legendary: Arcane Nova upgrade - release a ring of homing star-bolts instead of instant radius damage
-    const dmg = specialBurstDamage(weapon.baseDamage, player.skills, null, spec.dmgMult*0.6);
+    const dmg = specialBurstDamage(weapon.baseDamage, player.skills, null, spec.dmgMult*0.6*lvlBonus.dmgMult);
     const boltCount = 5;
     for(let i=0;i<boltCount;i++){
       const ang = (i/boltCount)*Math.PI*2;
@@ -1958,11 +2143,11 @@ function trySpecial(){
     spawnBurstFx(0xffe27a, 1.2);
     showMsg('Arcane Nova!');
   } else if(spec.kind==='burst'){
-    const radius = (player.cls==='warrior' && legendary) ? spec.radius*1.4 : spec.radius;
+    const radius = ((player.cls==='warrior' && legendary) ? spec.radius*1.4 : spec.radius) * lvlBonus.radiusMult;
     if(enemy.alive){
       const d = Math.hypot(enemy.x-player.x, enemy.z-player.z);
       if(d <= radius && hasLineOfSight(player.x,player.z,enemy.x,enemy.z)){
-        const dmg = specialBurstDamage(weapon.baseDamage, player.skills, null, spec.dmgMult);
+        const dmg = specialBurstDamage(weapon.baseDamage, player.skills, null, spec.dmgMult*lvlBonus.dmgMult);
         damageEnemy(dmg);
         if(spec.stunMs) enemy.attackCd = Math.max(enemy.attackCd, spec.stunMs);
         // Warrior Legendary: Cleaving Roar adds a knockback push
@@ -1978,9 +2163,10 @@ function trySpecial(){
     }
     spawnBurstFx(def.color, radius);
   } else if(spec.kind==='volley'){
-    const dmg = computeDamage(weapon.baseDamage, player.skills, null);
-    // Ranger Legendary: Phoenix Volley fires more arrows, each with a small splash on impact
-    const count = (player.cls==='ranger' && legendary) ? 5 : spec.count;
+    const dmg = Math.round(computeDamage(weapon.baseDamage, player.skills, null) * lvlBonus.dmgMult);
+    // Ranger Legendary: Phoenix Volley fires more arrows, each with a small splash on impact.
+    // Leveling adds further arrows on top (+1 every 10 levels), on any weapon tier.
+    const count = ((player.cls==='ranger' && legendary) ? 5 : spec.count) + lvlBonus.bonusCount;
     volleyAngles(count, spec.spread).forEach(offset=>{
       const ang = player.yaw + offset;
       const fx=-Math.sin(ang), fz=-Math.cos(ang);
@@ -1994,11 +2180,12 @@ function trySpecial(){
     });
     showMsg((player.cls==='ranger' && legendary) ? 'Phoenix Volley!' : spec.name+'!');
   } else if(spec.kind==='summon'){
-    const dmg = specialBurstDamage(10, player.skills, null, 1.0);
+    const dmg = specialBurstDamage(10, player.skills, null, lvlBonus.dmgMult);
+    const duration = Math.round(spec.durationMs * lvlBonus.durationMult);
     // Necromancer Legendary: Legion of Bone summons 2 allies with a damage buff
     const summonTwo = player.cls==='necromancer' && legendary;
-    spawnAlly(spec.allyKind, spec.durationMs, summonTwo?Math.round(dmg*1.3):dmg);
-    if(summonTwo) spawnAlly(spec.allyKind, spec.durationMs, Math.round(dmg*1.3));
+    spawnAlly(spec.allyKind, duration, summonTwo?Math.round(dmg*1.3):dmg);
+    if(summonTwo) spawnAlly(spec.allyKind, duration, Math.round(dmg*1.3));
     // Beastmaster Legendary: Primal Surge also buffs the player
     if(player.cls==='beastmaster' && legendary){
       player.buffMs = 6000; player.buffDmgMult = 1.25; player.buffSpeedMult = 1.2;
@@ -2046,16 +2233,25 @@ function update(dtMs){
   }
 
   if(enemy.alive){
-    const edef = ENEMY_DEFS[enemy.kind];
+    const edef = defFor(enemy.kind);
     enemy.hitFlash = Math.max(0, enemy.hitFlash - dtMs);
-    const effSpeed = edef.speed * (enemy.slowMs>0 ? 0.5 : 1);
+    // Boss enrage: past the threshold HP%, bosses hit harder and move faster.
+    if(enemy.isBoss && !enemy.enraged && edef.enrageHpPct && enemy.hp/enemy.maxHp <= edef.enrageHpPct){
+      enemy.enraged = true;
+      showMsg(edef.name+' enrages!');
+      updateBossBar();
+    }
+    const enrageSpeedMult = (enemy.enraged && edef.enrageSpeedMult) ? edef.enrageSpeedMult : 1;
+    const enrageDmgMult = (enemy.enraged && edef.enrageDmgMult) ? edef.enrageDmgMult : 1;
+    const effSpeed = edef.speed * (enemy.slowMs>0 ? 0.5 : 1) * enrageSpeedMult;
     const step = wolfStep(enemy.x, enemy.z, player.x, player.z, effSpeed, dt, 0.3);
     enemy.x = step.x; enemy.z = step.z;
     enemy.attackCd = Math.max(0, enemy.attackCd - dtMs);
     const d = Math.hypot(player.x-enemy.x, player.z-enemy.z);
     if(d <= edef.atkRange && enemy.attackCd<=0){
       enemy.attackCd = edef.atkCdMs;
-      player.hp = Math.max(0, player.hp-edef.dmg);
+      const rawDmg = edef.dmg * enrageDmgMult;
+      player.hp = Math.max(0, player.hp - computeDamageTaken(rawDmg, player.skills));
       showMsg(edef.biteMsg);
       updateHud();
     }
@@ -2076,7 +2272,7 @@ function update(dtMs){
     pr.x=next.x; pr.z=next.z; pr.life-=dtMs;
     pr.mesh.position.set(pr.x, EYE_HEIGHT-0.1, pr.z);
     let alive = pr.life>0 && !isWall(pr.x,pr.z);
-    if(alive && enemy.alive && projectileHits(pr.x,pr.z,enemy.x,enemy.z,ENEMY_DEFS[enemy.kind].hitRadius)){
+    if(alive && enemy.alive && projectileHits(pr.x,pr.z,enemy.x,enemy.z,defFor(enemy.kind).hitRadius)){
       damageEnemy(pr.damage);
       if(pr.element==='ice') enemy.slowMs = 2000;
       if(pr.element==='fire'){ enemy.dotMs = 3000; enemy.dotTickMs = 500; enemy.dotDmg = 3; }
@@ -2131,7 +2327,7 @@ function update(dtMs){
   camera.rotation.x = player.pitch;
 
   {
-    const edef = ENEMY_DEFS[enemy.kind];
+    const edef = defFor(enemy.kind);
     const flyBob = edef.flying ? Math.sin(performance.now()*0.004)*0.08 : 0;
     const groundY = edef.flying ? 1.15 + flyBob : 0;
     enemyMesh.position.set(enemy.x, groundY, enemy.z);
@@ -2191,7 +2387,10 @@ function renderMinimap(){
   const fx=-Math.sin(player.yaw), fz=-Math.cos(player.yaw);
   mg.beginPath(); mg.moveTo(player.x*cell, player.z*cell);
   mg.lineTo(player.x*cell+fx*9, player.z*cell+fz*9); mg.stroke();
-  if(enemy.alive){ mg.fillStyle='#'+ENEMY_DEFS[enemy.kind].color.toString(16).padStart(6,'0'); mg.beginPath(); mg.arc(enemy.x*cell, enemy.z*cell, 3,0,Math.PI*2); mg.fill(); }
+  if(enemy.alive){
+    mg.fillStyle='#'+defFor(enemy.kind).color.toString(16).padStart(6,'0');
+    mg.beginPath(); mg.arc(enemy.x*cell, enemy.z*cell, enemy.isBoss?5:3, 0, Math.PI*2); mg.fill();
+  }
   lootDrops.forEach(d=>{ mg.fillStyle='#4fd8c4'; mg.beginPath(); mg.arc(d.x*cell,d.z*cell,2,0,Math.PI*2); mg.fill(); });
 }
 
@@ -2269,17 +2468,20 @@ function buildSkillScreen(){
   SKILL_ORDER.forEach(key=>{
     const def = SKILL_DEFS[key];
     const rank = player.skills[key]||0;
+    const locked = def.unlockLevel && player.level < def.unlockLevel;
     const row = document.createElement('div'); row.className='skillnode';
-    const icon = document.createElement('div'); icon.className='icon'; icon.textContent=def.icon;
+    if(locked) row.style.opacity='0.5';
+    const icon = document.createElement('div'); icon.className='icon'; icon.textContent = locked ? '🔒' : def.icon;
     const info = document.createElement('div'); info.className='info';
     const nm = document.createElement('div'); nm.className='nm'; nm.textContent=def.name;
-    const ds = document.createElement('div'); ds.className='ds'; ds.textContent=def.desc;
+    const ds = document.createElement('div'); ds.className='ds';
+    ds.textContent = locked ? 'Unlocks at level '+def.unlockLevel : def.desc;
     info.appendChild(nm); info.appendChild(ds);
     const ranks = document.createElement('div'); ranks.className='ranks'; ranks.textContent=rank+'/'+def.maxRank;
     const btn = document.createElement('button'); btn.textContent='+';
-    btn.disabled = player.skillPoints<=0 || rank>=def.maxRank;
+    btn.disabled = locked || player.skillPoints<=0 || rank>=def.maxRank;
     btn.onclick = ()=>{
-      const res = spendSkillPoint(player.skills, player.skillPoints, key);
+      const res = spendSkillPoint(player.skills, player.skillPoints, key, player.level);
       if(res.spent){
         player.skills = res.skills; player.skillPoints = res.skillPoints;
         if(key==='vitality') refreshMaxHp();
@@ -2332,7 +2534,12 @@ window.__GAME3D_DEBUG__ = {
   getKills:()=>kills, getLootDrops:()=>lootDrops, getCurrentLevel:()=>currentLevel,
   newPlayer, update, tryAttack, trySpecial, buildClassSelect, buildSkillScreen,
   buildLevelGeometry, advanceLevel, damageEnemy, equipWeaponTier, spawnLootDrop,
-  setGameState:(s)=>{gameState=s;}, setRunning:(r)=>{running=r;}, setSelectedClass:(c)=>{selectedClass=c;}
+  setGameState:(s)=>{gameState=s;}, setRunning:(r)=>{running=r;}, setSelectedClass:(c)=>{selectedClass=c;},
+  BOSS_DEFS, defFor, pickBossKind, scaleBossMaxHp, enemyXpReward, nextBossThreshold,
+  getSpecialLevelBonuses, computeSpecialCooldown, computeDamageTaken,
+  getBossPending:()=>bossPending, getNextBossLevel:()=>nextBossLevel,
+  setBossPending:(v)=>{bossPending=v;}, setNextBossLevel:(v)=>{nextBossLevel=v;},
+  spawnBoss, spawnNextEncounter, respawnEnemy
 };
 })();
 </script>
